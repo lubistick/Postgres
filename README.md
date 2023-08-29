@@ -1,2 +1,3 @@
-# postgres
-Postgres tutorial test
+# Postgres
+
+Postgres tutorial.
