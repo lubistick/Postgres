@@ -41,7 +41,7 @@ Type "help" for help.
 You are now connected to database "demo" as user "postgres".
 ```
 
-О том как поднять демонстрационную базу данных смотрим [здесь](../optimization/README.md).
+О том как поднять демонстрационную базу данных смотрим [здесь](../optimization/demo.md).
 
 
 ### Информация о текущем подключении
