@@ -134,7 +134,7 @@ pending_restart | f
 \! echo work_mem=8MB >> /var/lib/postgresql/data/postgresql.conf
 ```
 
-Может быть применено только значение 8Мб (колонка `applied`), т.к. оно находится ниже в файле, чем 12Мб.
+Может быть применено только значение 8Мб (колонка `applied`), т.к. оно находится ниже в файле, чем 12Мб:
 ```sql
 SELECT * FROM pg_file_settings WHERE name = 'work_mem';
 
@@ -155,7 +155,7 @@ SELECT pg_reload_conf();
 (1 row)
 ```
 
-Смотрим `pg_settings`, изменились колонки со значением параметра (`setting`, `reset_val`) и источник (`source`, `sourcefile`, `sourceline`):
+Смотрим `pg_settings`, изменились колонки со значением параметра (`setting`, `reset_val`) и источником (`source`, `sourcefile`, `sourceline`):
 ```sql
 SELECT * FROM pg_settings WHERE name = 'work_mem'\gx
 
@@ -258,4 +258,75 @@ ALTER SYSTEM RESET ALL;
 ALTER SYSTEM
 ```
 
+## Установка параметров для текущего сеанса
 
+Поменяем значение `work_mem` прямо во время выполнения запросов:
+```sql
+SET work_mem TO '24MB';
+
+SET
+```
+
+Или с помощью функции:
+```sql
+SELECT set_config('work_mem', '32MB', false);
+
+ set_config
+------------
+ 32MB
+(1 row)
+```
+
+Третий параметр:
+- `true` - установить значение только на время текущей транзакции
+- `false` - установить значение до конца сеанса
+
+Это важно при работе через пул соединений, когда в одном сеансе могут выполняться транзакции разных пользователей.
+
+Получим значение параметра внутри запроса функцией `current_setting()`, т.к. внутри запроса мы не можем использовать команду `SHOW`:
+```sql
+SELECT current_setting('work_mem');
+
+ current_setting
+-----------------
+ 32MB
+(1 row)
+```
+
+Команды установки параметров для текущего сеанса - транзакционные. Если транзакция завершится с ошибкой, значения параметров откатятся:
+
+```sql
+BEGIN;
+
+BEGIN
+```
+
+```sql
+SET work_mem TO '64MB';
+
+SET
+```
+
+```sql
+SHOW work_mem;
+
+ work_mem
+----------
+ 64MB
+(1 row)
+```
+
+```sql
+ROLLBACK;
+
+ROLLBACK
+```
+
+```sql
+SHOW work_mem;
+
+ work_mem
+----------
+ 32MB
+(1 row)
+```
