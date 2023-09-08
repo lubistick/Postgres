@@ -440,16 +440,212 @@ days_of_week           | {1,2,3,4,5,6,7}
 ```
 
 
+### Aircrafts
 
+Модели самолетов, выполняющие рейсы.
 
-
-
-
-
-
-
-
+Реализация: многоязычное представление над `aircrafts_data`.
 
 ```sql
+\d aircrafts
 
+                   View "bookings.aircrafts"
+    Column     |     Type     | Collation | Nullable | Default
+---------------+--------------+-----------+----------+---------
+ aircraft_code | character(3) |           |          |
+ model         | text         |           |          |
+ range         | integer      |           |          |
+```
+
+```sql
+\d aircrafts_data
+
+                Table "bookings.aircrafts_data"
+    Column     |     Type     | Collation | Nullable | Default
+---------------+--------------+-----------+----------+---------
+ aircraft_code | character(3) |           | not null |
+ model         | jsonb        |           | not null |
+ range         | integer      |           | not null |
+Indexes:
+    "aircrafts_pkey" PRIMARY KEY, btree (aircraft_code)
+Check constraints:
+    "aircrafts_range_check" CHECK (range > 0)
+Referenced by:
+    TABLE "flights" CONSTRAINT "flights_aircraft_code_fkey" FOREIGN KEY (aircraft_code) REFERENCES aircrafts_data(aircraft_code)
+    TABLE "seats" CONSTRAINT "seats_aircraft_code_fkey" FOREIGN KEY (aircraft_code) REFERENCES aircrafts_data(aircraft_code) ON DELETE CASCADE
+```
+
+Колонки:
+
+- `aircraft_code` - код самолета
+- `model` - модель самолета
+- `range` - максимальная дальность полета, км
+
+Модели самолетов, обслуживающих рейсы, также используют стандартные трехсимвольные коды в качестве первичных ключей.
+```sql
+SELECT a.* FROM flights f JOIN aircrafts a ON a.aircraft_code = f.aircraft_code WHERE f.flight_id = 22566;
+
+ aircraft_code |     model     | range
+---------------+---------------+-------
+ 773           | Боинг 777-300 | 11100
+(1 row)
+```
+
+
+### Seats
+
+Места определяют схему салона.
+
+```sql
+\d seats
+
+                          Table "bookings.seats"
+     Column      |         Type          | Collation | Nullable | Default
+-----------------+-----------------------+-----------+----------+---------
+ aircraft_code   | character(3)          |           | not null |
+ seat_no         | character varying(4)  |           | not null |
+ fare_conditions | character varying(10) |           | not null |
+Indexes:
+    "seats_pkey" PRIMARY KEY, btree (aircraft_code, seat_no)
+Check constraints:
+    "seats_fare_conditions_check" CHECK (fare_conditions::text = ANY (ARRAY['Economy'::character varying::text, 'Comfort'::character varying::text, 'Business'::character varying::text]))
+Foreign-key constraints:
+    "seats_aircraft_code_fkey" FOREIGN KEY (aircraft_code) REFERENCES aircrafts_data(aircraft_code) ON DELETE CASCADE
+```
+
+Колонки:
+
+- `aircraft_code` - код самолета
+- `seat_no` - номер места
+- `fare_conditions` - класс обслуживания
+
+Все самолеты одной модели имеют одинаковую конфигурацию салона. Посмотрим первый ряд:
+
+```sql
+SELECT s.* FROM flights f
+    JOIN aircrafts a ON a.aircraft_code = f.aircraft_code
+    JOIN seats s ON s.aircraft_code = a.aircraft_code
+WHERE f.flight_id = 22566 AND s.seat_no ~ '^1.$';
+
+ aircraft_code | seat_no | fare_conditions
+---------------+---------+-----------------
+ 773           | 1A      | Business
+ 773           | 1C      | Business
+ 773           | 1D      | Business
+ 773           | 1G      | Business
+ 773           | 1H      | Business
+ 773           | 1K      | Business
+(6 rows)
+```
+
+Посмотрим общее число мест различных классов обслуживания:
+```sql
+SELECT s.fare_conditions, COUNT(*) FROM seats s WHERE s.aircraft_code = '773' GROUP BY s.fare_conditions;
+
+ fare_conditions | count
+-----------------+-------
+ Business        |    30
+ Comfort         |    48
+ Economy         |   324
+(3 rows)
+```
+
+
+### Boarding_passed
+
+Посадочный талон выдается при регистрации на рейс.
+
+```sql
+\d boarding_passes
+
+                  Table "bookings.boarding_passes"
+   Column    |         Type         | Collation | Nullable | Default
+-------------+----------------------+-----------+----------+---------
+ ticket_no   | character(13)        |           | not null |
+ flight_id   | integer              |           | not null |
+ boarding_no | integer              |           | not null |
+ seat_no     | character varying(4) |           | not null |
+Indexes:
+    "boarding_passes_pkey" PRIMARY KEY, btree (ticket_no, flight_id)
+    "boarding_passes_flight_id_boarding_no_key" UNIQUE CONSTRAINT, btree (flight_id, boarding_no)
+    "boarding_passes_flight_id_seat_no_key" UNIQUE CONSTRAINT, btree (flight_id, seat_no)
+Foreign-key constraints:
+    "boarding_passes_ticket_no_fkey" FOREIGN KEY (ticket_no, flight_id) REFERENCES ticket_flights(ticket_no, flight_id)
+```
+
+Колонки:
+
+- `ticket_no` - номер билета
+- `flight_id` - идентификатор рейса
+- `boarding_no` - номер посадочного талона (в порядке регистрации)
+- `seat_no` - номер места
+
+На каких местах сидел пассажир? Заглянем в посадочный талон:
+```sql
+SELECT f.status, bp.* FROM tickets t
+    JOIN ticket_flights tf ON tf.ticket_no = t.ticket_no
+    JOIN flights f ON f.flight_id = tf.flight_id
+    LEFT JOIN boarding_passes bp ON bp.ticket_no = tf.ticket_no AND bp.flight_id = tf.flight_id
+WHERE t.ticket_no = '0005435126781'
+ORDER BY f.scheduled_departure;
+
+  status   |   ticket_no   | flight_id | boarding_no | seat_no
+-----------+---------------+-----------+-------------+---------
+ Arrived   | 0005435126781 |     22566 |           4 | 22A
+ Arrived   | 0005435126781 |     95726 |          64 | 19D
+ Arrived   | 0005435126781 |     74643 |          42 | 8D
+ Departed  | 0005435126781 |    206625 |          11 | 3F
+ On Time   |               |           |             |
+ Scheduled |               |           |             |
+(6 rows)
+```
+
+На два оставшихся рейса пассажир еще не зарегистрировался.
+
+
+## Многоязычность
+
+В демобазе заложена возможность перевода названий аэропортов, городов и самолетов на другие языки.
+
+По умолчанию все названия выводятся по-русски:
+```sql
+SELECT * FROM airports WHERE airport_code = 'VKO' \gx
+
+-[ RECORD 1 ]+------------------------------
+airport_code | VKO
+airport_name | Внуково
+city         | Москва
+coordinates  | (37.2615013123,55.5914993286)
+timezone     | Europe/Moscow
+```
+
+Чтобы сменить язык, поменяем конфигурационный параметр:
+```sql
+SET bookings.lang = 'en';
+
+SET
+```
+
+Проверим:
+```sql
+SELECT * FROM airports WHERE airport_code = 'VKO' \gx
+
+-[ RECORD 1 ]+------------------------------
+airport_code | VKO
+airport_name | Vnukovo International Airport
+city         | Moscow
+coordinates  | (37.2615013123,55.5914993286)
+timezone     | Europe/Moscow
+```
+
+Реализация использует представление над базовой таблицей, которая содержит переводы в формате json:
+```sql
+SELECT * FROM airports_data WHERE airport_code = 'VKO' \gx
+
+-[ RECORD 1 ]+---------------------------------------------------------
+airport_code | VKO
+airport_name | {"en": "Vnukovo International Airport", "ru": "Внуково"}
+city         | {"en": "Moscow", "ru": "Москва"}
+coordinates  | (37.2615013123,55.5914993286)
+timezone     | Europe/Moscow
 ```
