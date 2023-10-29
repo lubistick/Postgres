@@ -255,6 +255,19 @@ SELECT current_setting('max_parallel_workers_per_gather');
 ```
 
 Количество параллельных процессов будет фиксировано, если указан параметр хранения `parallel_workers` для конкретной таблицы. Но не может превышать `max_parallel_workers_per_gather`.
+Вот так можно изменить параметр:
+```sql
+ALTER TABLE bookings SET (parallel_workers = 4);
+
+ALTER TABLE
+```
+
+Вернем обратно:
+```sql
+ALTER TABLE bookings RESET (parallel_workers);
+
+ALTER TABLE
+```
 
 А если не указан `parallel_workers` - будет зависеть от размера таблицы. Проверим размер таблицы `bookings`:
 ```sql
