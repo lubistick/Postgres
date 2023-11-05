@@ -110,4 +110,84 @@ FROM pg_class WHERE relname = 'bookings';
 (1 row)
 ```
 
+Вторая составляющая - индексный доступ (не делится между процессами, т.к. индекс читается процессами последовательно, страница за страницей):
+```sql
+SELECT
+  round(
+    (relpages / 4.0) * current_setting('random_page_cost')::real +
+    (reltuples / 4.0) * current_setting('cpu_index_tuple_cost')::real +
+    (reltuples / 4.0) * current_setting('cpu_operator_cost')::real
+  )
+FROM pg_class WHERE relname = 'bookings_pkey';
 
+ round 
+-------
+  9750
+(1 row)
+```
+Стоимость `cpu_operator_cost` учитывает необходимость сравнения значений (операция "меньше либо равно").
+
+Сложим `9750` и `5561` - получим `15311` (полная стоимость `Parallel Index Scan`).
+
+
+## Исключительно индексное сканирование
+
+Если вся необходимая информация содержится в самом индексе, то нет необходимости обращаться к таблице - за исключением проверки видимости:
+```sql
+EXPLAIN SELECT book_ref FROM bookings WHERE book_ref <= '100000';
+
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Index Only Scan using bookings_pkey on bookings  (cost=0.43..4180.24 rows=146732 width=7)
+   Index Cond: (book_ref <= '100000'::bpchar)
+(2 rows)
+
+
+```
+Вопрос в каком состоянии у нас была карта видимости и действительно ли при выборе такого метода доступа мы не обращаемся к табличным строкам.
+
+Узнать это можно только выполнив запрос.
+
+Посмотрим план с помощью EXPLAIN ANALYZE. Этот вариант команды EXPLAIN не просто показывает план,
+но и реально выполняет запрос, и вывод содержит больше полезных сведений.
+```sql
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF) SELECT book_ref FROM bookings WHERE book_ref <= '100000';
+
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Index Only Scan using bookings_pkey on bookings (actual rows=132109 loops=1)
+   Index Cond: (book_ref <= '100000'::bpchar)
+   Heap Fetches: 0
+ Planning Time: 0.046 ms
+ Execution Time: 28.348 ms
+(5 rows)
+```
+`EXPLAIN ANALYZE` для каждого узла в плане после слова `actual` показывает:
+- `rows` - сколько реально строк было выбрано `132109`
+- `loops` - сколько раз выполнялся узел плана `1`
+
+Дополнительные параметры в плане:
+- `Heap Fetches` - сколько строк было проверено с помощью таблицы `0`
+- `Planning Time` - сколько времени ушло на построение плана (число разное от раза к разу)
+- `Execution Time` - сколько времени ушло на выполнение запроса (число разное от раза к разу)
+
+
+
+Таким образом мы сможем сравнивать, о чем планировщик думал, когда строил план, и что реально получилось в процессе выполнения.
+
+В нашем случае не пришлось обращаться к таблице, потому что очистка таблицы выполнялась, следовательно, и карта видимости обновлена:
+```sql
+SELECT vacuum_count, autovacuum_count FROM pg_stat_all_tables WHERE relname = 'bookings';
+
+ vacuum_count | autovacuum_count 
+--------------+------------------
+            0 |                1
+(1 row)
+```
+
+Выполним очистку таблицы:
+```sql
+VACUUM bookings;
+
+VACUUM
+```
