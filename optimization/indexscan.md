@@ -257,4 +257,75 @@ EXPLAIN SELECT * FROM flights ORDER BY flight_id DESC;
 
 Второй способ - выполнить последовательное сканирование таблицы и затем отсортировать полученные данные.
 Чтобы посмотреть на план такого запроса, запретим индексный доступ (аналогично можно запретить и другие методы доступа):
+```sql
+SET enable_indexscan = off;
+    
+SET
+```
+На самом деле это не запрет (объяснить).
+
+```sql
+EXPLAIN SELECT * FROM flights ORDER BY flight_id DESC;
+
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Sort  (cost=31883.96..32421.12 rows=214867 width=63)
+   Sort Key: flight_id DESC
+   ->  Seq Scan on flights  (cost=0.00..4772.67 rows=214867 width=63)
+(3 rows)
+```
+
+Результаты сканирования передаются узлу `Sort`, который сортирует их по ключу `flight_id`.
+
+Стоимость такого запроса существенно выросла.
+
+Чтобы выполнить сортировку, надо получить весь набор данных полностью.
+Это неэффективно, если в результате требуется только часть выборки.
+Обратите внимание на стоимость:
+```sql
+EXPLAIN SELECT * FROM flights ORDER BY flight_id LIMIT 100;
+
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Limit  (cost=9718.54..9730.04 rows=100 width=63)
+   ->  Gather Merge  (cost=9718.54..24253.62 rows=126392 width=63)
+         Workers Planned: 1
+         ->  Sort  (cost=8718.53..9034.51 rows=126392 width=63)
+               Sort Key: flight_id
+               ->  Parallel Seq Scan on flights  (cost=0.00..3887.92 rows=126392 width=63)
+(6 rows)
+```
+
+Хотя стоимость и высока, она все же меньше, чем в предыдущем примере. Почему?
+```sql
+EXPLAIN (ANALYZE, TIMING OFF) SELECT * FROM flights ORDER BY flight_id LIMIT 100;
+
+                                                       QUERY PLAN
+------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=9718.54..9730.04 rows=100 width=63) (actual rows=100 loops=1)
+   ->  Gather Merge  (cost=9718.54..24253.62 rows=126392 width=63) (actual rows=100 loops=1)
+         Workers Planned: 1
+         Workers Launched: 1
+         ->  Sort  (cost=8718.53..9034.51 rows=126392 width=63) (actual rows=100 loops=2)
+               Sort Key: flight_id
+               Sort Method: top-N heapsort  Memory: 47kB
+               Worker 0:  Sort Method: top-N heapsort  Memory: 39kB
+               ->  Parallel Seq Scan on flights  (cost=0.00..3887.92 rows=126392 width=63) (actual rows=107434 loops=2)
+ Planning Time: 0.058 ms
+ Execution Time: 61.344 ms
+(11 rows)
+```
+
+Postgres умеет выполнять разные виды сортировок.
+`Sort Method` - `top-N heapsort` - который сводится к тому, что мы не всю выборку получаем, а потом ее отсортировываем, а мы просто 100 раз ходим за самым маленьким значением в таблицу.
+Этот способ позволяет отдавать строки одну за другой и мы останавливаемся после того, как эти 100 строк были выбраны.
+
+Здесь фактически не сортируется весь набор, а 100 раз находится минимальное значение.
+
+Индексное сканирование позволяет получать данные по мере необходимости. Сравните стоимость с предыдущим вариантом:
+```sql
+RESET enable_indexscan;
+    
+RESET
+```
 
