@@ -3,11 +3,14 @@
 Индекс - вспомогательная структура во внешней памяти, сопоставляет ключи и идентификаторы строк таблицы.
 
 Индексы:
-- ускоряют доступ при высокой селективности
+- ускоряют доступ при высокой селективности (когда нужно выбрать маленький объем данных)
 - поддерживают ограничения целостности
 - позволяют получить отсортированные данные
 
-Рассмотрим таблицу бронирований:
+## B-дерево
+
+Столбец `book_ref` в таблице бронирований является первичным ключом.
+Для него автоматически был создан индекс `bookings_pkey`:
 ```sql
 \d bookings
 
@@ -22,7 +25,13 @@ Indexes:
 Referenced by:
     TABLE "tickets" CONSTRAINT "tickets_book_ref_fkey" FOREIGN KEY (book_ref) REFERENCES bookings(book_ref)
 ```
-Столбец `book_ref` является первичным ключом и для него автоматически был создан индекс `bookings_pkey`.
+B-дерево или `btree` индекс:
+- это сбалансированное дерево, т.е. от корневого узла до листовой страницы всегда одинаковое расстояние
+- листовые страницы упорядочены и связаны между собой двунаправленным списком
+- для больших таблиц такой индекс будет сильно ветвистым.
+
+Поддерживаются те типы данных, которые можно сортировать (операции "больше", "меньше").
+И как результат этого, данные, которые мы получаем по индексу, будут автоматически отсортированы.
 
 Проверим план запроса с поиском одного значения:
 ```sql
@@ -198,9 +207,92 @@ VACUUM bookings;
 
 VACUUM
 ```
+Вакуум не помогает в обновлении карты видимости! (исправить текст выше)
+
+
+Обновим первую строку таблицы:
+```sql
+UPDATE bookings SET total_amount = total_amount WHERE book_ref = '000004';
+
+UPDATE 1
+```
+
+Сколько версий строк придется проверить теперь?
+```sql
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF) SELECT book_ref FROM bookings WHERE book_ref <= '100000';
+
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Index Only Scan using bookings_pkey on bookings (actual rows=132109 loops=1)
+   Index Cond: (book_ref <= '100000'::bpchar)
+   Heap Fetches: 158
+ Planning Time: 0.072 ms
+ Execution Time: 20.291 ms
+(5 rows)
+```
+Проверять приходится все версии, попадающие на измененную страницу.
+Heap Fetches: 158 - в данном случае было прочитано уже 158 версий строк с той нашей измененной страницы.
+Потому что карта видимости еще не обновилась.
+Используется Index Only Scan, однако в таблицу мы ходили.
+
+
+## Include индексы
+
+Еще один вариант создать покрывающий индекс - создать include индекс.
+
+Неключевые столбцы:
+- не используются при поиске по индексу
+- не учитываются ограничением уникальности
+- значения хранятся в индексной записи и возвращаются без обращения к таблице
+
+Индекс tickets_pkey не является покрывающим для приведенного запроса,
+поскольку в нем требуется не только столбец ticket_no (есть в индексе), но и book_ref:
+```sql
+EXPLAIN (analyze, buffers, costs off, summary off) SELECT ticket_no, book_ref FROM tickets WHERE ticket_no = '0005435990286';
+
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Index Scan using tickets_pkey on tickets (actual time=1.151..1.152 rows=1 loops=1)
+   Index Cond: (ticket_no = '0005435990286'::bpchar)
+   Buffers: shared read=4
+ Planning:
+   Buffers: shared hit=20 read=2
+(5 rows)
+```
+
+Создадим include-индекс, добавив в него неключевой столбец book_ref, так как он требуется запросу:
+```sql
+CREATE UNIQUE INDEX ON tickets (ticket_no) INCLUDE (book_ref);
+
+CREATE INDEX
+```
+
+Повторим запрос:
+```sql
+EXPLAIN (analyze, buffers, costs off, summary off)
+SELECT ticket_no, book_ref FROM tickets WHERE ticket_no = '0005435990286';
+
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Index Only Scan using tickets_ticket_no_book_ref_idx on tickets (actual time=0.049..0.050 rows=1 loops=1)
+   Index Cond: (ticket_no = '0005435990286'::bpchar)
+   Heap Fetches: 0
+   Buffers: shared hit=1 read=3
+ Planning:
+   Buffers: shared hit=13 read=1
+(6 rows)
+```
+Теперь оптимизатор выбирает метод Index Only Scan и использует только что созданный индекс.
+Количество прочитанных страниц сократилось (в моем примере нет).
+Поскольку карта видимости актуальна, обращаться к таблице не пришлось (Heap Fetches: 0).
+
+В include-индекс можно включать столбцы с типами данных, которые не поддерживаются B-деревом, например, геометрические типы и xml.
+
 
 
 ## Параллельное исключительно индексное сканирование
+
+(параллельное сканирование только индекса)
 
 Выполним запрос:
 ```sql
@@ -236,6 +328,98 @@ FROM pg_class WHERE relname = 'bookings';
 Для этого используется достаточно сложная математическая модель.
 В нашу задачу входит только показать общий принцип.
 
+
+## Исключение дубликатов в индексе
+
+Сравним размер индекса без исключения дубликатов и с исключением.
+Пример подобран таким образом, что в индексе должно быть много повторяющихся значений.
+
+Сначала создадим индекс, отключив исключение дубликатов с помощью параметра хранения deduplicate_items:
+```sql
+CREATE INDEX dedup_test ON ticket_flights (fare_conditions) WITH (deduplicate_items = off);
+
+CREATE INDEX
+```
+
+Посмотрим размер созданного индекса:
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('dedup_test'));
+
+ pg_size_pretty 
+----------------
+ 187 MB
+(1 row)
+```
+
+Выполним запрос с помощью индекса, отключив для этого последовательное сканирование.
+Обратите внимание на значение Buffers и время выполнения запроса:
+```sql
+SET enable_seqscan = off;
+
+SET
+```
+
+```sql
+EXPLAIN (analyze, buffers, costs off) SELECT fare_conditions FROM ticket_flights;
+
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Index Only Scan using dedup_test on ticket_flights (actual time=0.569..1345.772 rows=8391852 loops=1)
+   Heap Fetches: 0
+   Buffers: shared hit=5 read=23876
+ Planning:
+   Buffers: shared hit=19 read=1 dirtied=1
+ Planning Time: 0.476 ms
+ Execution Time: 1671.016 ms
+(7 rows)
+```
+
+Удалим индекс и создадим его заново. Параметр хранения deduplicate_items не указываем, т.к. по умолчанию он включен:
+```sql
+DROP INDEX dedup_test;
+
+DROP INDEX
+```
+
+```sql
+CREATE INDEX dedup_test ON ticket_flights (fare_conditions);
+
+CREATE INDEX
+```
+
+Опять посмотрим размер индекса:
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('dedup_test'))
+
+ pg_size_pretty 
+----------------
+ 56 MB
+(1 row)
+```
+Размер сократился более чем в 3 раза.
+
+Повторно выполним запрос:
+```sql
+EXPLAIN (analyze, buffers, costs off) SELECT fare_conditions FROM ticket_flights;
+
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Index Only Scan using dedup_test on ticket_flights (actual time=0.041..534.826 rows=8391852 loops=1)
+   Heap Fetches: 0
+   Buffers: shared hit=5 read=7077
+ Planning:
+   Buffers: shared hit=5 read=1
+ Planning Time: 0.269 ms
+ Execution Time: 864.220 ms
+(7 rows)
+```
+
+Количество Buffers тоже сократилось примерно в 3 раза. И запрос стал выполняться быстрее.
+```sql
+RESET enable_seqscan;
+
+RESET
+```
 
 ## Сортировка
 
@@ -353,16 +537,7 @@ EXPLAIN SELECT * FROM flights ORDER BY flight_id LIMIT 100;
 
 
 --------------
-В индексе есть ключи, которые указываются при создании индекса.
-Каждому ключу сопоставляется идентификатор строки в таблице.
 
-B-дерево - это сбалансированное дерево, т.е. от корневого узла до листовой страницы всегда одинаковое расстояние.
-Листовые страницы упорядочены - это двусвязный список.
-
-Для больших таблиц такой индекс будет сильно ветвистым.
-
-Поддерживаются те типы данных, которые можно сортировать (операции "больше", "меньше").
-И как результат этого, данные, которые мы получаем по индексу, будут автоматически отсортированы.
 
 
 
@@ -430,4 +605,5 @@ ORDER BY book_ref DESC;
 (5 rows)
 ```
 Количество страниц (`24`) увеличилось, поскольку в этом случае приходится спускаться от корня к каждому значению.
+
 
