@@ -585,3 +585,165 @@ EXPLAIN SELECT * FROM flights ORDER BY flight_id LIMIT 100;
 Несмотря на то, что стоимость всего индексного сканирования (`8248`) достаточно велика,
 общая стоимость плана (`4.26`) меньше, потому что узел `Index Scan` сразу отдает строки узлу `Limit` (строки упорядочены).
 
+## Максимальная сумма бронирования
+
+Напишем запрос, выбирающий максимальную сумму бронирования через предложения `ORDER BY` и `LIMIT`:
+```sql
+EXPLAIN SELECT total_amount FROM bookings ORDER BY total_amount DESC LIMIT 1;
+
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Limit  (cost=27641.46..27641.58 rows=1 width=6)
+   ->  Gather Merge  (cost=27641.46..232902.56 rows=1759258 width=6)
+         Workers Planned: 2
+         ->  Sort  (cost=26641.44..28840.51 rows=879629 width=6)
+               Sort Key: total_amount DESC
+               ->  Parallel Seq Scan on bookings  (cost=0.00..22243.29 rows=879629 width=6)
+(6 rows)
+```
+Планировщик последовательно сканирует всю таблицу, а затем сортирует данные.
+Это неэффективный доступ, поскольку нам требуется только одно значение.
+Но, пока нет индекса, это единственно возможный способ.
+
+Можно сформировать запрос с помощью агрегатной функции `max()`:
+```sql
+EXPLAIN SELECT max(total_amount) FROM bookings;
+
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=25442.58..25442.59 rows=1 width=32)
+   ->  Gather  (cost=25442.36..25442.57 rows=2 width=32)
+         Workers Planned: 2
+         ->  Partial Aggregate  (cost=24442.36..24442.37 rows=1 width=32)
+               ->  Parallel Seq Scan on bookings  (cost=0.00..22243.29 rows=879629 width=6)
+(5 rows)
+```
+
+### Оптимизация
+
+Создадим индекс:
+```sql
+CREATE INDEX ON bookings(total_amount);
+
+CREATE INDEX
+```
+
+Повторяем запрос с `ORDER BY` и `LIMIT`:
+```sql
+EXPLAIN SELECT total_amount FROM bookings ORDER BY total_amount DESC LIMIT 1;
+
+                                                       QUERY PLAN                                                       
+------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.43..0.46 rows=1 width=6)
+   ->  Index Only Scan Backward using bookings_total_amount_idx on bookings  (cost=0.43..54879.08 rows=2111110 width=6)
+(2 rows)
+```
+Теперь планировщик выбрал сканирование только индекса.
+
+Повторяем запрос через `max()`:
+```sql
+EXPLAIN SELECT max(total_amount) FROM bookings;
+
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Result  (cost=0.46..0.47 rows=1 width=32)
+   InitPlan 1 (returns $0)
+     ->  Limit  (cost=0.43..0.46 rows=1 width=6)
+           ->  Index Only Scan Backward using bookings_total_amount_idx on bookings  (cost=0.43..60156.85 rows=2111110 width=6)
+                 Index Cond: (total_amount IS NOT NULL)
+(5 rows)
+```
+И в этом случае планировщик выбрал сканирование только индекса,
+добавив условие `total_amount IS NOT NULL`, поскольку функция `max()` не должна учитывать неопределенные значения.
+
+`InitPlan` - узел плана, соответствует подзапросу, который выполняется один раз.
+
+Фактически планировщик переформулировал запрос следующим образом:
+```sql
+EXPLAIN SELECT (
+  SELECT total_amount FROM bookings
+  WHERE total_amount IS NOT NULL
+  ORDER BY total_amount DESC LIMIT 1
+);
+
+                                                           QUERY PLAN                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ Result  (cost=0.46..0.47 rows=1 width=16)
+   InitPlan 1 (returns $0)
+     ->  Limit  (cost=0.43..0.46 rows=1 width=6)
+           ->  Index Only Scan Backward using bookings_total_amount_idx on bookings  (cost=0.43..60156.85 rows=2111110 width=6)
+                 Index Cond: (total_amount IS NOT NULL)
+(5 rows)
+```
+Если бы запрос выполнялся несколько раз, вместо `InitPlan` был бы узел `SubPlan`.
+
+
+## Порядок сортировки при создании индекса
+
+Порядок важен для многоколоночных индексов.
+Создадим индекс на таблице рейсов по аэропортам вылета и прилета:
+```sql
+CREATE INDEX dep_arr ON flights(departure_airport, arrival_airport);
+
+CREATE INDEX
+```
+
+Индекс используется при сортировке в одном направлении:
+```sql
+EXPLAIN SELECT * FROM flights ORDER BY departure_airport, arrival_airport;
+
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Index Scan using dep_arr on flights  (cost=0.29..14414.16 rows=214867 width=63)
+(1 row)
+```
+
+И в одном направлении, но в обратном порядке:
+```sql
+EXPLAIN SELECT * FROM flights ORDER BY departure_airport DESC, arrival_airport DESC;
+
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Index Scan Backward using dep_arr on flights  (cost=0.29..14414.16 rows=214867 width=63)
+(1 row)
+```
+
+Но не при сортировке в разных направлениях:
+```sql
+EXPLAIN SELECT * FROM flights ORDER BY departure_airport, arrival_airport DESC;
+
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Sort  (cost=31883.96..32421.12 rows=214867 width=63)
+   Sort Key: departure_airport, arrival_airport DESC
+   ->  Seq Scan on flights  (cost=0.00..4772.67 rows=214867 width=63)
+(3 rows)
+```
+
+Здесь приходится отдельно выполнять сортировку результатов.
+
+В этом случае поможет другой индекс:
+```sql
+CREATE INDEX dep_asc_arr_desc ON flights(departure_airport, arrival_airport DESC);
+
+CREATE INDEX
+```
+
+```sql
+EXPLAIN SELECT * FROM flights ORDER BY departure_airport, arrival_airport DESC;
+
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Index Scan using dep_asc_arr_desc on flights  (cost=0.29..14414.16 rows=214867 width=63)
+(1 row)
+```
+
+А также в этом:
+```sql
+EXPLAIN SELECT * FROM flights ORDER BY departure_airport DESC, arrival_airport;
+
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Index Scan Backward using dep_asc_arr_desc on flights  (cost=0.29..14414.16 rows=214867 width=63)
+(1 row)
+```
