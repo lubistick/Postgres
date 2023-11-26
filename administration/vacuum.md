@@ -325,10 +325,256 @@ free_percent       | 0.38
 Плотность увеличилась до `90 %`. Освобожденное место отдано операционной системе.
 
 
+## Обновление большого количества данных без чрезмерного разрастания таблицы
+
+В примере сравним обновление большого массива данных с очисткой и без.
+
+### Отключение автоочистки для всего кластера
+
+Найдем процесс автоочистки и отключим его:
+```sql
+SELECT pid, backend_start, backend_type FROM pg_stat_activity WHERE backend_type = 'autovacuum launcher';
+
+ pid |        backend_start         |    backend_type     
+-----+------------------------------+---------------------
+  26 | 2023-11-25 19:00:58.45924+00 | autovacuum launcher
+(1 row)
+```
+```sql
+ALTER SYSTEM SET autovacuum = off;
+
+ALTER SYSTEM
+```
+```sql
+SELECT pg_reload_conf();
+
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+```
+
+Убедимся, что процесс не работает:
+```sql
+SELECT pid, backend_start, backend_type FROM pg_stat_activity WHERE backend_type = 'autovacuum launcher';
+
+ pid | backend_start | backend_type 
+-----+---------------+--------------
+(0 rows)
+```
 
 
+### База данных, таблица и индекс
+
+Создадим базу данных и подключимся к ней:
+```sql
+CREATE DATABASE admin_maintenance;
+
+CREATE DATABASE
+```
+```sql
+\c admin_maintenance
+
+You are now connected to database "admin_maintenance" as user "postgres".
+```
+
+Создадим таблицу с одним числовым столбцом:
+```sql
+CREATE TABLE t(n numeric);
+
+CREATE TABLE
+```
+
+Создадим индекс:
+```sql
+CREATE INDEX t_n on t(n);
+
+CREATE INDEX
+```
+
+Вставим в таблицу 100 000 строк со случайными числами:
+```sql
+INSERT INTO t SELECT random() FROM generate_series(1,100000);
+
+INSERT 0 100000
+```
 
 
+### Вычисление размера таблицы и индекса
+
+Запишем запрос, который вычисляет размер таблицы и индекса, в переменную `SIZE`:
+```sql
+\set SIZE 'SELECT pg_size_pretty(pg_table_size(''t'')) table_size, pg_size_pretty(pg_indexes_size(''t'')) index_size \\g (footer=off)'
+```
+
+Посмотрим переменную:
+```sql
+:SIZE
+
+ table_size | index_size 
+------------+------------
+ 4360 kB    | 4256 kB
+```
 
 
+### Изменение строк без очистки
 
+```sql
+UPDATE t SET n = n WHERE n < 0.5;
+
+UPDATE 49742
+```
+
+```sql
+:SIZE
+
+ table_size | index_size 
+------------+------------
+ 6512 kB    | 6456 kB
+```
+
+Размер таблицы и индекса увеличился.
+
+```sql
+UPDATE t SET n = n WHERE n < 0.5;
+
+UPDATE 49742
+```
+
+```sql
+:SIZE
+
+ table_size | index_size 
+------------+------------
+ 8664 kB    | 7496 kB
+```
+
+Размер снова увеличился.
+
+```sql
+UPDATE t SET n = n WHERE n < 0.5;
+
+UPDATE 49742
+```
+
+```sql
+:SIZE
+
+ table_size | index_size 
+------------+------------
+ 11 MB      | 10 MB
+```
+
+Размер таблицы и индекса постоянно растет.
+
+
+### Полная очистка
+
+```sql
+VACUUM FULL t;
+
+VACUUM
+```
+
+```sql
+:SIZE
+
+ table_size | index_size 
+------------+------------
+ 4336 kB    | 3104 kB
+```
+
+Размер таблицы практически вернулся к начальному.
+
+Индекс стал компактнее - построить индекс по большому объему данных эффективнее, чем добавлять эти данные к индексу построчно.
+
+
+### Изменение строк с очисткой
+
+Теперь после каждого изменения будем вызывать обычную очистку и сравним результаты:
+
+```sql
+UPDATE t SET n = n WHERE n < 0.5;
+
+UPDATE 49742
+```
+
+```sql
+VACUUM t;
+
+VACUUM
+```
+
+```sql
+:SIZE
+
+ table_size | index_size 
+------------+------------
+ 6512 kB    | 4640 kB
+```
+Помним, что `VACUUM` удаляет старые версии строк, но освобожденное место не возвращается операционной системе.
+Поэтому размер вырос.
+
+```sql
+UPDATE t SET n = n WHERE n < 0.5;
+
+UPDATE 49742
+```
+
+```sql
+VACUUM t;
+
+VACUUM
+```
+
+```sql
+:SIZE
+
+ table_size | index_size 
+------------+------------
+ 6512 kB    | 4640 kB
+```
+
+И еще один апдейт:
+```sql
+UPDATE t SET n = n WHERE n < 0.5;
+
+UPDATE 49742
+```
+
+```sql
+VACUUM t;
+
+VACUUM
+```
+
+```sql
+:SIZE
+
+ table_size | index_size 
+------------+------------
+ 6512 kB    | 4640 kB
+```
+
+Размер увеличился один раз, затем стабилизировался.
+
+### Итоги
+
+Пример показывает, что изменение большого объема данных по возможности следует разделить на несколько транзакций.
+Это позволит автоматической очистке своевременно удалять ненужные версии строк, что позволит избежать чрезмерного разрастания таблицы.
+
+Восстанавливаем автоочистку.
+```sql
+ALTER SYSTEM RESET autovacuum;
+
+ALTER SYSTEM
+```
+
+```sql
+SELECT pg_reload_conf();
+
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+```
