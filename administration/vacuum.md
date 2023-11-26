@@ -392,7 +392,7 @@ CREATE INDEX t_n on t(n);
 CREATE INDEX
 ```
 
-Вставим в таблицу 100 000 строк со случайными числами:
+Вставим в таблицу `100 000` строк со случайными числами:
 ```sql
 INSERT INTO t SELECT random() FROM generate_series(1,100000);
 
@@ -419,6 +419,7 @@ INSERT 0 100000
 
 ### Изменение строк без очистки
 
+Обновим примерно половину строк:
 ```sql
 UPDATE t SET n = n WHERE n < 0.5;
 
