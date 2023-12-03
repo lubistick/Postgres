@@ -270,11 +270,11 @@ SHOW logging_collector;
 
  logging_collector 
 -------------------
- on
+ off
 (1 row)
 ```
 
-Включим логирование, чтобы сравнить выключение сервера в разных режимах:
+Включим логирование:
 ```sql
 ALTER SYSTEM SET logging_collector = on;
 
@@ -294,6 +294,7 @@ docker start postgres-demo
 postgres-demo
 ```
 
+Теперь сравним выключение сервера в разных режимах.
 
 ### Режим fast
 
