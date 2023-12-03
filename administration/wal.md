@@ -215,10 +215,10 @@ Postgres автоматически удаляет журнальные файл
 Это особенно плохо работает на `HDD` (крутящийся диск), потому что требуется время, чтобы спозиционировать головку на нужную дорожку.
 
 Запись в журнал `WAL` может вестись в разных режимах:
-- синхронном
+- синхронном (значение по умолчанию)
 - асинхронном
 
-Этот конфигурационный параметр можно устанавливать на лету:
+За это отвечает конфигурационный параметр `synchronous_commit`, который можно устанавливать на лету:
 ```sql
 SELECT * FROM pg_settings WHERE name = 'synchronous_commit' \gx
 
@@ -253,53 +253,170 @@ pending_restart | f
 Надежность уменьшается, зато производительность увеличивается.
 
 
+## Уровни журнала
 
+Журнал можно применять и для других целей, если добавить в него дополнительную информацию:
 
+- `minimal` - журнал обеспечивает только восстановление после сбоя
+- `replica` - возможность создания резервных копий и репликации (значение по умолчанию)
+- `logical` - возможность логической репликации
 
+Объем данных, которые попадают в журнал регулируется параметром `wal_level`:
+```sql
+SELECT * FROM pg_settings WHERE name = 'wal_level' \gx
 
-
-
------
-
-
-
-Уровни журнала 
-
-
-Minimal
-
-Гарантия восстановления после сбоя
-
-
-Replica (по умолчанию)
-
-Резервное копирование
-
-Репликация: передача и проигрывание журнала на другом сервере
-
-
-Logical
-
-Логическая репликация: информация о добавлении, изменении и удалении табличных строк
-
-
-
-
-----------
+-[ RECORD 1 ]---+--------------------------------------------------
+name            | wal_level                                        
+setting         | replica                                          
+unit            |
+category        | Write-Ahead Log / Settings
+short_desc      | Sets the level of information written to the WAL.
+extra_desc      |
+context         | postmaster
+vartype         | enum
+source          | default
+min_val         |
+max_val         |
+enumvals        | {minimal,replica,logical}
+boot_val        | replica
+reset_val       | replica
+sourcefile      |
+sourceline      |
+pending_restart | f
+```
 
 
 ## Восстановление при помощи журнала
 
-Измененные табличные страницы находятся в буферном кэше, но еще не записаны на диск.
-При обычной остановке сервер выполняет контрольную точку, чтобы записать все грязные страницы на диск,
-но мы сымитируем сбой системы, послав сигнал процессу postmaster:
+Режимы остановки сервера:
 
-```bash
-head -n 1 $PGDATA/postmaster.pid
+- `fast` - принудительно завершает сеансы и записывает на диск изменения из ОЗУ
+- `smart` - ожидает завершения всех сеансов и записывает на диск изменения из ОЗУ
+- `immediate` - принудительно завершает сеансы, НЕ записывает на диск изменения из ОЗУ (при запуске потребуется восстановление)
 
-1
+
+### Логирование сообщений сервера
+
+Процесс `logger`, отвечающий за логирование сообщений сервера выключен:
+```sql
+SHOW logging_collector;
+
+ logging_collector 
+-------------------
+ on
+(1 row)
 ```
 
+Включим его:
+```sql
+ALTER SYSTEM SET logging_collector = on;
+
+ALTER SYSTEM
+```
+
+Перезапустим сервер, чтобы процесс запустился:
+```sql
+docker stop postgres-demo
+
+postgres-demo
+```
+
+```sql
+docker start postgres-demo
+
+postgres-demo
+```
+
+
+### Режим fast
+
+При остановке в режиме `fast` сервер выполняет контрольную точку, чтобы записать все "грязные" страницы на диск.
+Для остановки в этом режиме отправим сигнал `SIGINT` главному процессу Postgres с помощью команды `kill`
+(идентификатор процесса узнаем из файла `postmaster.pid` в каталоге `PGDATA`):
+
 ```bash
-kill -9 1
+kill -INT `head -1 $PGDATA/postmaster.pid`
+```
+
+Сервер остановился, запустим его:
+```sql
+docker start postgres-demo
+
+postgres-demo
+```
+
+Посмотрим, куда пишутся сообщения сервера:
+```sql
+SELECT pg_current_logfile();
+
+          pg_current_logfile
+--------------------------------------
+ log/postgresql-2023-12-03_134742.log
+(1 row)
+```
+
+Посмотрим сообщения:
+```bash
+cat /var/lib/postgresql/data/log/postgresql-2023-12-03_134742.log
+
+2023-12-03 13:47:42.932 UTC [1] LOG:  starting PostgreSQL 14.7 on x86_64-pc-linux-musl, compiled by gcc (Alpine 12.2.1_git20220924-r4) 12.2.1 20220924, 64-bit
+2023-12-03 13:47:42.932 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+2023-12-03 13:47:42.932 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+2023-12-03 13:47:42.938 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2023-12-03 13:47:42.945 UTC [23] LOG:  database system was shut down at 2023-12-03 13:46:48 UTC
+2023-12-03 13:47:42.950 UTC [1] LOG:  database system is ready to accept connections
+```
+
+СУБД готова принимать подключения - `database system is ready to accept connections`.
+
+### Режиме immediate
+
+Режим `immediate` в каком-то смысле равносилен выдергиванию питания сервера.
+Сымитируем сбой системы, остановив сервер в этом режиме - отправим сигнал `SIGQUIT` главному процессу Postgres с помощью команды `kill`:
+
+```bash
+kill -QUIT `head -1 $PGDATA/postmaster.pid`
+```
+
+Сервер остановился, запустим его:
+```sql
+docker start postgres-demo
+
+postgres-demo
+```
+
+Посмотрим, куда пишутся сообщения сервера:
+```sql
+SELECT pg_current_logfile();
+
+          pg_current_logfile
+--------------------------------------
+ log/postgresql-2023-12-03_135231.log
+(1 row)
+```
+
+Посмотрим сообщения:
+```bash
+cat /var/lib/postgresql/data/log/postgresql-2023-12-03_135231.log
+
+2023-12-03 13:52:31.161 UTC [1] LOG:  starting PostgreSQL 14.7 on x86_64-pc-linux-musl, compiled by gcc (Alpine 12.2.1_git20220924-r4) 12.2.1 20220924, 64-bit
+2023-12-03 13:52:31.161 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+2023-12-03 13:52:31.161 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+2023-12-03 13:52:31.167 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2023-12-03 13:52:31.173 UTC [23] LOG:  database system was interrupted; last known up at 2023-12-03 13:47:42 UTC
+2023-12-03 13:52:31.354 UTC [23] LOG:  database system was not properly shut down; automatic recovery in progress
+2023-12-03 13:52:31.356 UTC [23] LOG:  redo starts at 0/A5B318B8
+2023-12-03 13:52:31.356 UTC [23] LOG:  invalid record length at 0/A5B318F0: wanted 24, got 0
+2023-12-03 13:52:31.357 UTC [23] LOG:  redo done at 0/A5B318B8 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+2023-12-03 13:52:31.367 UTC [1] LOG:  database system is ready to accept connections
+```
+
+СУБД выполнила восстановление `automatic recovery in progress.` После чего готова принимать подключения.
+
+### Режим smart
+
+Для остановки в режиме `smart` нужно отправить сигнал `SIGTERM` главному процессу Postgres с помощью команды `kill`:
+
+```bash
+kill -TERM `head -1 $PGDATA/postmaster.pid`
 ```
