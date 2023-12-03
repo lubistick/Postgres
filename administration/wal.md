@@ -253,39 +253,6 @@ pending_restart | f
 Надежность уменьшается, зато производительность увеличивается.
 
 
-## Уровни журнала
-
-Журнал можно применять и для других целей, если добавить в него дополнительную информацию:
-
-- `minimal` - журнал обеспечивает только восстановление после сбоя
-- `replica` - возможность создания резервных копий и репликации (значение по умолчанию)
-- `logical` - возможность логической репликации
-
-Объем данных, которые попадают в журнал регулируется параметром `wal_level`:
-```sql
-SELECT * FROM pg_settings WHERE name = 'wal_level' \gx
-
--[ RECORD 1 ]---+--------------------------------------------------
-name            | wal_level                                        
-setting         | replica                                          
-unit            |
-category        | Write-Ahead Log / Settings
-short_desc      | Sets the level of information written to the WAL.
-extra_desc      |
-context         | postmaster
-vartype         | enum
-source          | default
-min_val         |
-max_val         |
-enumvals        | {minimal,replica,logical}
-boot_val        | replica
-reset_val       | replica
-sourcefile      |
-sourceline      |
-pending_restart | f
-```
-
-
 ## Восстановление при помощи журнала
 
 Режимы остановки сервера:
@@ -307,14 +274,14 @@ SHOW logging_collector;
 (1 row)
 ```
 
-Включим его:
+Включим логирование, чтобы сравнить выключение сервера в разных режимах:
 ```sql
 ALTER SYSTEM SET logging_collector = on;
 
 ALTER SYSTEM
 ```
 
-Перезапустим сервер, чтобы процесс запустился:
+Перезапустим сервер, чтобы применить изменения:
 ```sql
 docker stop postgres-demo
 
@@ -420,3 +387,36 @@ cat /var/lib/postgresql/data/log/postgresql-2023-12-03_135231.log
 ```bash
 kill -TERM `head -1 $PGDATA/postmaster.pid`
 ```
+
+
+## Уровни журнала
+
+Журнал можно применять и для других целей, если добавить в него дополнительную информацию.
+Объем данных, которые попадают в журнал регулируется параметром `wal_level`:
+```sql
+SELECT * FROM pg_settings WHERE name = 'wal_level' \gx
+
+-[ RECORD 1 ]---+--------------------------------------------------
+name            | wal_level                                        
+setting         | replica                                          
+unit            |
+category        | Write-Ahead Log / Settings
+short_desc      | Sets the level of information written to the WAL.
+extra_desc      |
+context         | postmaster
+vartype         | enum
+source          | default
+min_val         |
+max_val         |
+enumvals        | {minimal,replica,logical}
+boot_val        | replica
+reset_val       | replica
+sourcefile      |
+sourceline      |
+pending_restart | f
+```
+
+Значения:
+- `minimal` - журнал обеспечивает только восстановление после сбоя
+- `replica` - возможность создания резервных копий и репликации (значение по умолчанию)
+- `logical` - возможность логической репликации
