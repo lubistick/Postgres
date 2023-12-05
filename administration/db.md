@@ -17,7 +17,7 @@ List of databases
 (3 rows)
 ```
 Имеющиеся базы данных:
-- `postgres` - база данных, созданная по умолчанию
+- `postgres` - БД, созданная по умолчанию
 - `template0` - шаблон, нужен для работы утилиты `pg_dump`
 - `template1` - шаблон, нужен для создания других БД
 
@@ -82,7 +82,113 @@ SELECT digest('Hello, world!', 'md5');
 (1 row)
 ```
 
-Например, мы считаем, что расширение `pgcrypto` необходимо в каждой БД... (26:29 тайминг видео)
+Например, мы считаем, что расширение `pgcrypto` необходимо в каждой новой БД, которую мы будем создавать.
+
+Чтобы каждый раз не выполнять команду `CREATE EXTENSION` в каждой новой БД, которую мы создаем, мы создали это расширение в БД `template1`.
+
+Создадим БД:
+```sql
+CREATE DATABASE db;
+
+CREATE DATABASE
+```
+
+```sql
+SELECT datname, datistemplate, datallowconn, datconnlimit FROM pg_database;
+
+  datname  | datistemplate | datallowconn | datconnlimit 
+-----------+---------------+--------------+--------------
+ postgres  | f             | t            |           -1
+ template1 | t             | t            |           -1
+ template0 | t             | f            |           -1
+ db        | f             | t            |           -1
+(4 rows)
+```
+
+Подключимся к ней:
+```bash
+\c db
+
+You are now connected to database "db" as user "postgres".
+```
+
+Поскольку для создания по умолчанию используется шаблон `template1`, в ней также будут доступны функции пакета `pgcrypto`:
+```sql
+SELECT digest('Hello, world!', 'md5');
+
+               digest               
+------------------------------------
+ \x6cd3556deb0da54bca060b4c39479839
+(1 row)
+```
+
+
+## Управление базами данных
+
+Созданную БД можно переименовывать (к ней не должно быть подключений):
+```bash
+\c postgres
+
+You are now connected to database "postgres" as user "postgres".
+```
+
+```sql
+ALTER DATABASE db RENAME TO appdb;
+
+ALTER DATABASE
+```
+
+```sql
+SELECT datname, datistemplate, datallowconn, datconnlimit FROM pg_database;
+
+  datname  | datistemplate | datallowconn | datconnlimit 
+-----------+---------------+--------------+--------------
+ postgres  | f             | t            |           -1
+ template1 | t             | t            |           -1
+ template0 | t             | f            |           -1
+ appdb     | f             | t            |           -1
+(4 rows)
+```
+
+Можно изменять и другие параметры, например максимальное количество одновременных подключений:
+```sql
+ALTER DATABASE appdb CONNECTION LIMIT 10;
+
+ALTER DATABASE
+```
+
+```sql
+SELECT datname, datistemplate, datallowconn, datconnlimit FROM pg_database;
+
+  datname  | datistemplate | datallowconn | datconnlimit 
+-----------+---------------+--------------+--------------
+ postgres  | f             | t            |           -1
+ template1 | t             | t            |           -1
+ template0 | t             | f            |           -1
+ appdb     | f             | t            |           10
+(4 rows)
+```
+
+Размер БД можно узнать с помощью функции:
+```sql
+SELECT pg_database_size('appdb');
+
+ pg_database_size 
+------------------
+          8782627
+(1 row)
+```
+
+Чтобы не считать разряды, можно вывести размер в читаемом виде:
+```sql
+SELECT pg_size_pretty(pg_database_size('appdb'));
+
+ pg_size_pretty 
+----------------
+ 8577 kB
+(1 row)
+```
+
 
 
 
