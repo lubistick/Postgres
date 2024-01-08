@@ -51,7 +51,7 @@ SELECT datname, datistemplate, datallowconn, datconnlimit FROM pg_database;
 You are now connected to database "template1" as user "postgres".
 ```
 
-Проверим, доступна ли функция `digest`, вычисляющая хэш-код текстовой строки:
+Вызовем функцию `digest`, вычисляющую хэш-код текстовой строки:
 ```sql
 SELECT digest('Hello, world!', 'md5');
 
@@ -61,7 +61,8 @@ LINE 1: SELECT digest('Hello, world!', 'md5');
 HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 ```
 
-Такой функции нет.
+Такой функции нет...
+
 На самом деле `digest` определена в расширении `pgcrypto`.
 Расширение предварительно установлено в ОС.
 Чтобы использовать функции, которые входят в его состав, необходимо в БД выполнить команду `CREATE EXTENSION`.
@@ -83,7 +84,6 @@ SELECT digest('Hello, world!', 'md5');
 ```
 
 Например, мы считаем, что расширение `pgcrypto` необходимо в каждой новой БД, которую мы будем создавать.
-
 Чтобы каждый раз не выполнять команду `CREATE EXTENSION` в каждой новой БД, которую мы создаем, мы создали это расширение в БД `template1`.
 
 Создадим БД:
@@ -112,7 +112,7 @@ SELECT datname, datistemplate, datallowconn, datconnlimit FROM pg_database;
 You are now connected to database "db" as user "postgres".
 ```
 
-Поскольку для создания по умолчанию используется шаблон `template1`, в ней также будут доступны функции пакета `pgcrypto`:
+Поскольку для создания БД по умолчанию используется шаблон `template1`, в новой БД также доступны функции пакета `pgcrypto`:
 ```sql
 SELECT digest('Hello, world!', 'md5');
 
@@ -188,6 +188,108 @@ SELECT pg_size_pretty(pg_database_size('appdb'));
  8577 kB
 (1 row)
 ```
+
+
+## Схемы
+
+Объекты мы всегда располагаем в каких-то схемах.
+
+Список схем можно узнать командой `dn` (`describe namespace`):
+```sql
+\dn
+
+  List of schemas
+  Name  |  Owner
+--------+----------
+ public | postgres
+(1 row)
+```
+По умолчанию команда не показывает системные схемы.
+
+Создадим новую схему:
+```sql
+\c appdb
+
+You are now connected to database "appdb" as user "postgres".
+```
+
+```sql
+CREATE SCHEMA app;
+
+CREATE SCHEMA
+```
+
+```sql
+\dn
+
+  List of schemas
+  Name  |  Owner
+--------+----------
+ app    | postgres
+ public | postgres
+(2 rows)
+```
+
+Если теперь создать таблицу и не указать имя схемы, в какую схему она попадет?
+
+Надо посмотреть на путь поиска.
+
+```sql
+SHOW search_path;
+
+   search_path   
+-----------------
+ "$user", public
+(1 row)
+```
+
+Конструкция "$user" обозначает схему с тем же именем, что и имя текущего пользователя (в нашем случае "postgres").
+Поскольку такой схемы нет, она игнорируется.
+
+Чтобы не думать над тем, какие схемы есть, каких нет, и какие не указаны явно, можно воспользоваться функцией:
+
+```sql
+SELECT current_schemas(true);
+
+   current_schemas   
+---------------------
+ {pg_catalog,public}
+(1 row)
+```
+
+Теперь создадим таблицу:
+```sql
+CREATE table t(s text);
+
+CREATE TABLE
+```
+
+```sql
+INSERT INTO t VALUES ('Я - таблица t');
+
+INSERT 0 1
+```
+
+Список таблиц можно получить командой `\dt`:
+
+```sql
+\dt
+
+        List of relations
+ Schema | Name | Type  |  Owner
+--------+------+-------+----------
+ public | t    | table | postgres
+(1 row)
+```
+
+
+
+
+
+
+
+
+
 
 
 
