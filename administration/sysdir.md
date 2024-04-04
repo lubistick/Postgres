@@ -241,6 +241,90 @@ AS $function$pg_database_size_oid$function$
 Все команды `psql`, описывающие объекты, обращаются к таблицам системного каталога.
 Чтобы посмотреть, какие запросы на самом деле выполняет `psql`, можно установить переменную `ECHO_HIDDEN`:
 
+```sql
+\set ECHO_HIDDEN on
+```
+
+```sql
+\dt employees
+
+********* QUERY **********
+SELECT n.nspname as "Schema",
+  c.relname as "Name",
+  CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'i' THEN 'index' WHEN 'S' THEN 'sequence' WHEN 's' THEN 'special' WHEN 't' THEN 'TOAST table' WHEN 'f' THEN 'foreign table' WHEN 'p' 
+THEN 'partitioned table' WHEN 'I' THEN 'partitioned index' END as "Type",
+  pg_catalog.pg_get_userbyid(c.relowner) as "Owner"
+FROM pg_catalog.pg_class c
+     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     LEFT JOIN pg_catalog.pg_am am ON am.oid = c.relam
+WHERE c.relkind IN ('r','p','t','s','')
+  AND c.relname OPERATOR(pg_catalog.~) '^(employees)$' COLLATE pg_catalog.default
+  AND pg_catalog.pg_table_is_visible(c.oid)
+ORDER BY 1,2;
+**************************
+
+           List of relations
+ Schema |   Name    | Type  |  Owner
+--------+-----------+-------+----------
+ public | employees | table | postgres
+(1 row)
+```
+
+```sql
+\unset ECHO_HIDDEN
+```
+
+
+## OID и REG-типы
+
+Как мы видели, описания таблиц и представлений хранятся в `pg_class`.
+А столбцы располагаются в отдельной таблице `pg_attribute`.
+Чтобы получить список столбцов конкретной таблицы, надо соединить `pg_class` и `pg_attribute`:
+
+```sql
+SELECT a.attname, a.atttypid FROM pg_attribute a WHERE a.attrelid = (
+  SELECT oid FROM pg_class WHERE relname = 'employees'
+) AND a.attnum > 0;
+
+ attname | atttypid 
+---------+----------
+ id      |       23
+ name    |       25
+ manager |       23
+(3 rows)
+```
+
+Используя REG-типы, запрос можно написать проще, без явного обращения к `pg_class`:
+
+```sql
+SELECT a.attname, a.atttypid FROM pg_attribute a WHERE a.attrelid = 'employees'::regclass AND a.attnum > 0;
+
+ attname | atttypid 
+---------+----------
+ id      |       23
+ name    |       25
+ manager |       23
+(3 rows)
+```
+
+Здесь мы преобразовали строку 'employees' к типу OID.
+Аналогично мы можем вывести OID как текстовое значение:
+
+```sql
+SELECT a.attname, a.atttypid::regtype FROM pg_attribute a WHERE a.attrelid = 'employees'::regclass AND a.attnum > 0;
+
+ attname | atttypid 
+---------+----------
+ id      | integer
+ name    | text
+ manager | integer
+(3 rows)
+```
+
+Системный каталог - метаинформация о кластере в самом кластере.
+
+Часть таблиц системного каталога хранится в БД, часть - общая для всего кластера.
+
 
 
 
