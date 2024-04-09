@@ -2,20 +2,30 @@
 
 В схеме `pg_catalog` располагаются таблицы и представления, которые описывают все объекты кластера баз данных.
 Эта схема есть в каждой БД кластера.
+Все таблицы и представления системного каталога начинаются с префикса "pg_".
+Названия столбцов имеют трехбуквенный префикс, который как правило соответствует имени таблицы.
 
-Стандартом SQL регламентировано понятие системного каталога и каким образом с ним работать.
-Postgres поддерживает стандарт, поэтому к системному каталогу можно обратиться и через схему `information_schema.`
+Например, в таблице `pg_tablespace` все столбцы начинаются с префикса "spc":
+```sql
+SELECT * FROM pg_tablespace WHERE spcname = 'pg_global';
+
+ oid  |  spcname  | spcowner | spcacl | spcoptions
+------+-----------+----------+--------+------------
+ 1664 | pg_global |       10 |        |
+(1 row)
+```
 
 В кластере в каждой БД создается свой набор таблиц системного каталога.
 Однако существуют несколько объектов каталога, которые являются общими для всего кластера, например, список самих БД.
 Эти таблицы хранятся вне какой-либо БД, но при этом одинаково видны из каждой БД.
 
-Все таблицы и представления системного каталога начинаются с префикса "pg_".
+Стандартом SQL регламентировано понятие системного каталога и каким образом с ним работать.
+Postgres поддерживает стандарт, поэтому к системному каталогу можно обратиться и через схему `information_schema.`
 
 
-## Некоторые объекты системного каталога
+## Объекты системного каталога
 
-Создадим БД и текстовые объекты:
+Создадим тестовую БД, в ней таблицу и представление:
 
 ```sql
 CREATE DATABASE data_catalog;
@@ -46,8 +56,10 @@ SELECT * FROM employees WHERE manager IS NULL;
 CREATE VIEW
 ```
 
-Некоторые таблицы системного каталога нам уже знакомы из предыдущей темы. Это базы данных:
 
+### Базы данных
+
+Информация о базах данных:
 ```sql
 SELECT * FROM pg_database WHERE datname = 'data_catalog' \gx
 
@@ -68,8 +80,10 @@ dattablespace | 1663
 datacl        |
 ```
 
-И схемы:
 
+### Схемы
+
+Информация о схемах:
 ```sql
 SELECT * FROM pg_namespace WHERE nspname = 'public' \gx
 
@@ -79,6 +93,9 @@ nspname  | public
 nspowner | 10
 nspacl   | {postgres=UC/postgres,=UC/postgres}
 ```
+
+
+### Отношения
 
 Важная таблица `pg_class` хранит описание целого ряда объектов: таблиц, представлений (включая материализованные), индексов, последовательностей.
 Все эти объекты называются в PostgreSQL общим словом "отношение" (relation), отсюда префикс "rel" в названии столбцов:
@@ -100,10 +117,12 @@ SELECT relname, relkind, relnamespace, relfilenode, relowner, reltablespace  FRO
 - i - индекс
 - v - представление
 
-
-Конечно, для каждого типа объектов имеет смысл только часть столбцов.
+Для каждого типа объектов имеет смысл только часть столбцов.
 Кроме того, удобнее смотреть не на многочисленные OID, а на нормальные значения.
 Для этого существуют различные представления, например:
+
+
+### Таблицы
 
 ```sql
 SELECT schemaname, tablename, tableowner, tablespace FROM pg_tables WHERE schemaname = 'public';
@@ -114,6 +133,8 @@ SELECT schemaname, tablename, tableowner, tablespace FROM pg_tables WHERE schema
 (1 row)
 ```
 
+
+### Представления
 
 ```sql
 SELECT * FROM pg_views WHERE schemaname = 'public';
@@ -131,8 +152,36 @@ SELECT * FROM pg_views WHERE schemaname = 'public';
 
 ## Использование команд psql
 
-Список всех "отношений" можно посмотреть командой `\d*` в `psql`, где `*` - символ, обозначающий тип объекта (как `relkind`).
-Например, таблицы:
+Посмотрим список всех отношений командой `\d` в `psql`:
+```sql
+\d
+
+                List of relations
+ Schema |       Name       |   Type   |  Owner   
+--------+------------------+----------+----------
+ public | employees        | table    | postgres
+ public | employees_id_seq | sequence | postgres
+ public | top_manager      | view     | postgres
+(3 rows)
+```
+
+Модификатор "+" дает больше информации:
+```sql
+\d+
+
+                                            List of relations
+ Schema |       Name       |   Type   |  Owner   | Persistence | Access method |    Size    | Description
+--------+------------------+----------+----------+-------------+---------------+------------+-------------
+ public | employees        | table    | postgres | permanent   | heap          | 8192 bytes |
+ public | employees_id_seq | sequence | postgres | permanent   |               | 8192 bytes |
+ public | top_manager      | view     | postgres | permanent   |               | 0 bytes    |
+(3 rows)
+```
+
+
+### Таблицы
+
+Отфильтруем только таблицы, для этого допишем символ "t" в предыдущую команду:
 
 ```sql
 \dt
@@ -144,7 +193,9 @@ SELECT * FROM pg_views WHERE schemaname = 'public';
 (1 row)
 ```
 
-Или представления:
+
+
+Или "v" для представления:
 
 ```sql
 \dv
@@ -156,19 +207,7 @@ SELECT * FROM pg_views WHERE schemaname = 'public';
 (1 row)
 ```
 
-Эти команды можно снабдить модификатором "+", чтобы получить больше информации:
-
-```sql
-\dt+
-
-                                       List of relations
- Schema |   Name    | Type  |  Owner   | Persistence | Access method |    Size    | Description
---------+-----------+-------+----------+-------------+---------------+------------+-------------
- public | employees | table | postgres | permanent   | heap          | 8192 bytes |
-(1 row)
-```
-
-Чтобы получить детальную информацию о конкретном объекте, надо воспользоваться командой `\d` без дополнительной буквы:
+Чтобы получить детальную информацию о конкретном объекте, воспользоваться командой `\d` без дополнительной буквы:
 
 ```sql
 \d top_managers
@@ -181,7 +220,7 @@ SELECT * FROM pg_views WHERE schemaname = 'public';
  manager | integer |           |          |
 ```
 
-Модификатор `+` остается в силе.
+Модификатор `+` остается в силе:
 
 ```sql
 \d+ top_managers
