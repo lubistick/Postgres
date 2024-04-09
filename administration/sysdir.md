@@ -1,11 +1,16 @@
 # Системный каталог
 
 В схеме `pg_catalog` располагаются таблицы и представления, которые описывают все объекты кластера баз данных.
+Эта схема есть в каждой БД кластера.
 
-Стандартом SQL регламентировано само понятие системного каталога и каким образом с ним нужно работать.
+Стандартом SQL регламентировано понятие системного каталога и каким образом с ним работать.
 Postgres поддерживает стандарт, поэтому к системному каталогу можно обратиться и через схему `information_schema.`
 
-Схема `pg_catalog` есть в каждой БД кластера.
+В кластере в каждой БД создается свой набор таблиц системного каталога.
+Однако существуют несколько объектов каталога, которые являются общими для всего кластера, например, список самих БД.
+Эти таблицы хранятся вне какой-либо БД, но при этом одинаково видны из каждой БД.
+
+Все таблицы и представления системного каталога начинаются с префикса "pg_".
 
 
 ## Некоторые объекты системного каталога
@@ -35,7 +40,7 @@ CREATE TABLE
 ```
 
 ```sql
-CREATE VIEW top_manager AS
+CREATE VIEW top_managers AS
 SELECT * FROM employees WHERE manager IS NULL;
 
 CREATE VIEW
@@ -86,7 +91,7 @@ SELECT relname, relkind, relnamespace, relfilenode, relowner, reltablespace  FRO
  employees_id_seq | S       |         2200 |       65721 |       10 |             0
  employees        | r       |         2200 |       65722 |       10 |             0
  employees_pkey   | i       |         2200 |       65728 |       10 |             0
- top_manager      | v       |         2200 |           0 |       10 |             0
+ top_managers     | v       |         2200 |           0 |       10 |             0
 (4 rows)
 ```
 Типы объектов различаются по столбцу `relkind`:
@@ -113,13 +118,13 @@ SELECT schemaname, tablename, tableowner, tablespace FROM pg_tables WHERE schema
 ```sql
 SELECT * FROM pg_views WHERE schemaname = 'public';
 
- schemaname |  viewname   | viewowner |              definition              
-------------+-------------+-----------+--------------------------------------
- public     | top_manager | postgres  |  SELECT employees.id,               +
-            |             |           |     employees.name,                 +
-            |             |           |     employees.manager               +
-            |             |           |    FROM employees                   +
-            |             |           |   WHERE (employees.manager IS NULL);
+ schemaname |  viewname    | viewowner |              definition              
+------------+--------------+-----------+--------------------------------------
+ public     | top_managers | postgres  |  SELECT employees.id,               +
+            |              |           |     employees.name,                 +
+            |              |           |     employees.manager               +
+            |              |           |    FROM employees                   +
+            |              |           |   WHERE (employees.manager IS NULL);
 (1 row)
 ```
 
@@ -145,9 +150,9 @@ SELECT * FROM pg_views WHERE schemaname = 'public';
 \dv
 
            List of relations
- Schema |    Name     | Type |  Owner
---------+-------------+------+----------
- public | top_manager | view | postgres
+ Schema |    Name      | Type |  Owner
+--------+--------------+------+----------
+ public | top_managers | view | postgres
 (1 row)
 ```
 
@@ -166,9 +171,9 @@ SELECT * FROM pg_views WHERE schemaname = 'public';
 Чтобы получить детальную информацию о конкретном объекте, надо воспользоваться командой `\d` без дополнительной буквы:
 
 ```sql
-\d top_manager
+\d top_managers
 
-             View "public.top_manager"
+             View "public.top_managers"
  Column  |  Type   | Collation | Nullable | Default
 ---------+---------+-----------+----------+---------
  id      | integer |           |          |
@@ -179,9 +184,9 @@ SELECT * FROM pg_views WHERE schemaname = 'public';
 Модификатор `+` остается в силе.
 
 ```sql
-\d+ top_manager
+\d+ top_managers
 
-                          View "public.top_manager"
+                          View "public.top_managers"
  Column  |  Type   | Collation | Nullable | Default | Storage  | Description
 ---------+---------+-----------+----------+---------+----------+-------------
  id      | integer |           |          |         | plain    |
@@ -326,24 +331,6 @@ SELECT a.attname, a.atttypid::regtype FROM pg_attribute a WHERE a.attrelid = 'em
 Часть таблиц системного каталога хранится в БД, часть - общая для всего кластера.
 
 
-
-
-
-
-
-
-
-
----
-
-Что такое системный каталог и как к нему обращаться
-
-Объекты системного каталога и их расположение
-
-Правила именования объектов
-
-Специальные типы данных
-
 ---
 
 
@@ -374,4 +361,53 @@ Reg-типы
 
 
 
+---
+
+практика
+
+## Полный список схем
+
+```sql
+CREATE TEMP TABLE t(n integer);
+
+CREATE TABLE
+```
+
+```sql
+\dnS
+
+        List of schemas
+        Name        |  Owner
+--------------------+----------
+ information_schema | postgres
+ pg_catalog         | postgres
+ pg_temp_4          | postgres
+ pg_toast           | postgres
+ pg_toast_temp_4    | postgres
+ public             | postgres
+(6 rows)
+```
+
+Временная таблица расположена в схеме `pg_temp_N`, где N - некоторое число.
+Такие схемы создаются для каждого сеанса, в котором появляются временные объекты, поэтому их может быть несколько.
+Имя схемы для временных объектов текущего сеанса можно получить, обратившись к системной функции:
+
+```sql
+SELECT pg_my_temp_schema()::regnamespace;
+
+ pg_my_temp_schema 
+-------------------
+ pg_temp_4
+(1 row)
+```
+
+Однако в большинстве случаев точное имя схемы знать не нужно, поскольку при необходимости к временному объекту можно обратиться, используя имя схемы `pg_temp`:
+
+```sql
+SELECT * FROM pg_temp.t;
+
+ n 
+---
+(0 rows)
+```
 
