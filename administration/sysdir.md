@@ -157,7 +157,7 @@ SELECT * FROM pg_views WHERE schemaname = 'public';
 Например, `\df` - describe function, `\sf` - show function.
 Полный список всегда можно посмотреть в документации или командой `\?`.
 
-Посмотрим список всех отношений командой `\d` в `psql`:
+Посмотрим список всех отношений командой `\d`:
 ```sql
 \d
 
@@ -245,176 +245,18 @@ View definition:
 ```
 
 
-### Функции
+### Схемы
 
-Посмотрим на функции командой `\df`.
-Модификатор `S` выводит не только пользовательские, но и системные объекты.
-А с помощью шаблона, который пишется через пробел, можно ограничить выборку:
-
-```sql
-\dfS pg*size
-
-                                  List of functions
-   Schema   |          Name          | Result data type | Argument data types | Type
-------------+------------------------+------------------+---------------------+------
- pg_catalog | pg_column_size         | integer          | "any"               | func
- pg_catalog | pg_database_size       | bigint           | name                | func
- pg_catalog | pg_database_size       | bigint           | oid                 | func
- pg_catalog | pg_indexes_size        | bigint           | regclass            | func
- pg_catalog | pg_relation_size       | bigint           | regclass            | func
- pg_catalog | pg_relation_size       | bigint           | regclass, text      | func
- pg_catalog | pg_table_size          | bigint           | regclass            | func
- pg_catalog | pg_tablespace_size     | bigint           | name                | func
- pg_catalog | pg_tablespace_size     | bigint           | oid                 | func
- pg_catalog | pg_total_relation_size | bigint           | regclass            | func
-(10 rows)
-```
-
-Посмотрим на конкретную функцию командой `\sf`:
-
-```sql
-\sf pg_catalog.pg_database_size(oid)
-
-CREATE OR REPLACE FUNCTION pg_catalog.pg_database_size(oid)
- RETURNS bigint
- LANGUAGE internal
- PARALLEL SAFE STRICT
-AS $function$pg_database_size_oid$function$
-```
-
-
-
-## Изучение структуры системного каталога
-
-Все команды `psql`, описывающие объекты, обращаются к таблицам системного каталога.
-Чтобы посмотреть, какие запросы на самом деле выполняет `psql`, можно установить переменную `ECHO_HIDDEN`:
-
-```sql
-\set ECHO_HIDDEN on
-```
-
-```sql
-\dt employees
-
-********* QUERY **********
-SELECT n.nspname as "Schema",
-  c.relname as "Name",
-  CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'i' THEN 'index' WHEN 'S' THEN 'sequence' WHEN 's' THEN 'special' WHEN 't' THEN 'TOAST table' WHEN 'f' THEN 'foreign table' WHEN 'p' 
-THEN 'partitioned table' WHEN 'I' THEN 'partitioned index' END as "Type",
-  pg_catalog.pg_get_userbyid(c.relowner) as "Owner"
-FROM pg_catalog.pg_class c
-     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-     LEFT JOIN pg_catalog.pg_am am ON am.oid = c.relam
-WHERE c.relkind IN ('r','p','t','s','')
-  AND c.relname OPERATOR(pg_catalog.~) '^(employees)$' COLLATE pg_catalog.default
-  AND pg_catalog.pg_table_is_visible(c.oid)
-ORDER BY 1,2;
-**************************
-
-           List of relations
- Schema |   Name    | Type  |  Owner
---------+-----------+-------+----------
- public | employees | table | postgres
-(1 row)
-```
-
-```sql
-\unset ECHO_HIDDEN
-```
-
-
-## OID и REG-типы
-
-Как мы видели, описания таблиц и представлений хранятся в `pg_class`.
-А столбцы располагаются в отдельной таблице `pg_attribute`.
-Чтобы получить список столбцов конкретной таблицы, надо соединить `pg_class` и `pg_attribute`:
-
-```sql
-SELECT a.attname, a.atttypid FROM pg_attribute a WHERE a.attrelid = (
-  SELECT oid FROM pg_class WHERE relname = 'employees'
-) AND a.attnum > 0;
-
- attname | atttypid 
----------+----------
- id      |       23
- name    |       25
- manager |       23
-(3 rows)
-```
-
-Используя REG-типы, запрос можно написать проще, без явного обращения к `pg_class`:
-
-```sql
-SELECT a.attname, a.atttypid FROM pg_attribute a WHERE a.attrelid = 'employees'::regclass AND a.attnum > 0;
-
- attname | atttypid 
----------+----------
- id      |       23
- name    |       25
- manager |       23
-(3 rows)
-```
-
-Здесь мы преобразовали строку 'employees' к типу OID.
-Аналогично мы можем вывести OID как текстовое значение:
-
-```sql
-SELECT a.attname, a.atttypid::regtype FROM pg_attribute a WHERE a.attrelid = 'employees'::regclass AND a.attnum > 0;
-
- attname | atttypid 
----------+----------
- id      | integer
- name    | text
- manager | integer
-(3 rows)
-```
-
-Системный каталог - метаинформация о кластере в самом кластере.
-
-Часть таблиц системного каталога хранится в БД, часть - общая для всего кластера.
-
-
----
-
-
-SQL-доступ
-
-просмотр: SELECT
-изменение: CREATE, ALTER, DROP
-
-Доступ в psql
-
-специальные команды для удобного просмотра
-
----
-
-
-OID - тип для идентификатора объекта
-
-первичные и внешние ключи в таблицах системного каталога
-
-скрытый столбец, в запросах надо указывать явно
-
-
-Reg-типы
-
-псевдонимы OID для некоторых таблиц системного каталога (regclass для pg_class и т.п.)
-
-привидение текстового имени объекта к типу OID и обратно
-
-
-
----
-
-практика
-
-## Полный список схем
+Создадим временную таблицу:
 
 ```sql
 CREATE TEMP TABLE t(n integer);
 
 CREATE TABLE
 ```
+
+Посмотрим на список схем командой `\dn`.
+Модификатор `S` выводит не только пользовательские, но и системные объекты.
 
 ```sql
 \dnS
@@ -454,3 +296,151 @@ SELECT * FROM pg_temp.t;
 (0 rows)
 ```
 
+
+### Функции
+
+Посмотрим на функции командой `\df`.
+Модификатор `S` выводит не только пользовательские, но и системные объекты.
+С помощью шаблона, который пишется через пробел, можно ограничить выборку:
+
+```sql
+\dfS pg*size
+
+                                  List of functions
+   Schema   |          Name          | Result data type | Argument data types | Type
+------------+------------------------+------------------+---------------------+------
+ pg_catalog | pg_column_size         | integer          | "any"               | func
+ pg_catalog | pg_database_size       | bigint           | name                | func
+ pg_catalog | pg_database_size       | bigint           | oid                 | func
+ pg_catalog | pg_indexes_size        | bigint           | regclass            | func
+ pg_catalog | pg_relation_size       | bigint           | regclass            | func
+ pg_catalog | pg_relation_size       | bigint           | regclass, text      | func
+ pg_catalog | pg_table_size          | bigint           | regclass            | func
+ pg_catalog | pg_tablespace_size     | bigint           | name                | func
+ pg_catalog | pg_tablespace_size     | bigint           | oid                 | func
+ pg_catalog | pg_total_relation_size | bigint           | regclass            | func
+(10 rows)
+```
+
+Посмотрим на конкретную функцию командой `\sf`:
+
+```sql
+\sf pg_catalog.pg_database_size(oid)
+
+CREATE OR REPLACE FUNCTION pg_catalog.pg_database_size(oid)
+ RETURNS bigint
+ LANGUAGE internal
+ PARALLEL SAFE STRICT
+AS $function$pg_database_size_oid$function$
+```
+
+
+## Изучение структуры системного каталога
+
+Чтобы посмотреть, какие запросы на самом деле выполняет `psql`, можно установить переменную `ECHO_HIDDEN`:
+
+```sql
+\set ECHO_HIDDEN on
+```
+
+```sql
+\dt employees
+
+********* QUERY **********
+SELECT n.nspname as "Schema",
+  c.relname as "Name",
+  CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' WHEN 'i' THEN 'index' WHEN 'S' THEN 'sequence' WHEN 's' THEN 'special' WHEN 't' THEN 'TOAST table' WHEN 'f' THEN 'foreign table' WHEN 'p' 
+THEN 'partitioned table' WHEN 'I' THEN 'partitioned index' END as "Type",
+  pg_catalog.pg_get_userbyid(c.relowner) as "Owner"
+FROM pg_catalog.pg_class c
+     LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     LEFT JOIN pg_catalog.pg_am am ON am.oid = c.relam
+WHERE c.relkind IN ('r','p','t','s','')
+  AND c.relname OPERATOR(pg_catalog.~) '^(employees)$' COLLATE pg_catalog.default
+  AND pg_catalog.pg_table_is_visible(c.oid)
+ORDER BY 1,2;
+**************************
+
+           List of relations
+ Schema |   Name    | Type  |  Owner
+--------+-----------+-------+----------
+ public | employees | table | postgres
+(1 row)
+```
+
+```sql
+\unset ECHO_HIDDEN
+```
+
+
+## OID и reg-типы
+
+Описания таблиц и представлений хранятся в `pg_class`.
+Столбцы располагаются в отдельной таблице `pg_attribute`.
+Получим список столбцов конкретной таблицы, соединим `pg_class` и `pg_attribute`:
+
+```sql
+SELECT a.attname, a.atttypid FROM pg_attribute a WHERE a.attrelid = (
+  SELECT oid FROM pg_class WHERE relname = 'employees'
+) AND a.attnum > 0;
+
+ attname | atttypid 
+---------+----------
+ id      |       23
+ name    |       25
+ manager |       23
+(3 rows)
+```
+
+Столбцы:
+- `attname` - название колонки
+- `atttypid` - `OID` или уникальный идентификатор для таблиц системного каталога
+
+`reg-типы` приводят текстовое имя объекта к типу `OID` или наоборот - тип `OID` преобразуют в текстовое имя.
+Используя `reg-типы`, запрос можно написать проще, без явного обращения к `pg_class`.
+Преобразуем строку "employees" к типу `OID` с помощью конструкции `::regclass`:
+
+```sql
+SELECT a.attname, a.atttypid FROM pg_attribute a WHERE a.attrelid = 'employees'::regclass AND a.attnum > 0;
+
+ attname | atttypid 
+---------+----------
+ id      |       23
+ name    |       25
+ manager |       23
+(3 rows)
+```
+
+Аналогично мы можем вывести `OID` как текстовое значение с помощью конструкции `::regtype`:
+
+```sql
+SELECT a.attname, a.atttypid::regtype FROM pg_attribute a WHERE a.attrelid = 'employees'::regclass AND a.attnum > 0;
+
+ attname | atttypid 
+---------+----------
+ id      | integer
+ name    | text
+ manager | integer
+(3 rows)
+```
+
+Полный список `reg-типов`:
+```sql
+\dT reg*
+
+                        List of data types                         
+   Schema   |     Name      |             Description              
+------------+---------------+--------------------------------------
+ pg_catalog | regclass      | registered class                     
+ pg_catalog | regcollation  | registered collation
+ pg_catalog | regconfig     | registered text search configuration
+ pg_catalog | regdictionary | registered text search dictionary
+ pg_catalog | regnamespace  | registered namespace
+ pg_catalog | regoper       | registered operator
+ pg_catalog | regoperator   | registered operator (with args)
+ pg_catalog | regproc       | registered procedure
+ pg_catalog | regprocedure  | registered procedure (with args)
+ pg_catalog | regrole       | registered role
+ pg_catalog | regtype       | registered type
+(11 rows)
+```
