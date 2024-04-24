@@ -1,15 +1,7 @@
 # Табличные пространства
 
-Табличное пространство - каталог, в котором хранятся файлы.
-
-Таб пр pg_global -> $PGDATA/global/
-Таб пр pg_default -> $PGDATA/base/dboid/
-Таб пр -> $PGDATA/pg_tblspc/tsoid/<символическая_ссылка>
-
-
-## Служебные табличные пространства
-
-При создании кластера создаются два табличных пространства:
+Табличное пространство (ТП) - каталог, в котором хранятся файлы.
+При создании кластера создаются два ТП:
 
 ```sql
 SELECT * FROM pg_tablespace;
@@ -21,13 +13,14 @@ SELECT * FROM pg_tablespace;
 (2 rows)
 ```
 
-- `pg_global` - общие объекты кластера
-- `pg_default` - табличное пространство по умолчанию
+- `pg_global` - табличное пространство для общих объектов кластера, располагается в каталоге `$PGDATA/global/`
+- `pg_default` - табличное пространство по умолчанию, располагается в каталоге `$PGDATA/base/<oid_БД>/`
+- пользовательские табличные пространства располагаются в каталоге `$PGDATA/pg_tblspc/<oid_табличного_пространства>/<символическая_ссылка>`
 
 
-## Пользовательские табличные пространства
+## Создание табличного пространства
 
-Для нового табличного пространства нужен пустой каталог, владельцем которого является пользователь postgres.
+Для нового ТП нужен пустой каталог, владельцем которого является пользователь `postgres`.
 
 ```bash
 mkdir /var/lib/postgresql/ts_dir
@@ -37,7 +30,7 @@ mkdir /var/lib/postgresql/ts_dir
 chown postgres /var/lib/postgresql/ts_dir
 ```
 
-Теперь можно создать табличное пространство:
+Создадим ТП:
 
 ```sql
 CREATE TABLESPACE ts LOCATION '/var/lib/postgresql/ts_dir';
@@ -45,7 +38,7 @@ CREATE TABLESPACE ts LOCATION '/var/lib/postgresql/ts_dir';
 CREATE TABLESPACE
 ```
 
-Список табличных пространств можно получить и командой psql:
+Получим список ТП командой `psql`:
 
 ```sql
 \db
@@ -59,18 +52,35 @@ CREATE TABLESPACE
 (3 rows)
 ```
 
-Для стандартных табличных пространств расположение не указывается, потому что оно и так понятно.
+Получим `oid` созданного ТП:
+```sql
+SELECT oid FROM pg_tablespace WHERE spcname = 'ts';
+
+  oid  
+-------
+ 82125
+(1 row)
+```
+
+Посмотрим символическую ссылку:
+
+```bash
+ls -l /var/lib/postgresql/data/pg_tblspc/
+
+total 0
+lrwxrwxrwx    1 postgres postgres        26 Apr 23 15:06 82125 -> /var/lib/postgresql/ts_dir
+```
 
 
-У каждой БД есть табличное пространство "по умолчанию".
-Создадим БД и назначим ей ts в качестве такого пространства:
+## Табличное пространство для базы данных
+
+У каждой БД есть ТП "по умолчанию". Создадим БД и назначим ей `ts` в качестве такого пространства:
 ```sql
 CREATE DATABASE appdb TABLESPACE ts;
 
 CREATE DATABASE
 ```
-
-Теперь все созданные таблицы и индексы будут попадать в ts, если явно не указать другое.
+Теперь все созданные таблицы и индексы будут попадать в `ts`, если явно не указать другое.
 
 Подключимся к БД:
 ```sql
@@ -86,13 +96,17 @@ CREATE TABLE t1(id serial, name text);
 CREATE TABLE
 ```
 
-И создадим еще одну таблицу в другом табличном пространстве:
+
+### Табличное пространство для таблицы
+
+Создадим еще одну таблицу в другом табличном пространстве:
 ```sql
 CREATE TABLE t2(id serial, name text) TABLESPACE pg_default;
 
 CREATE TABLE
 ```
 
+Посмотрим ТП для созданных выше таблиц:
 ```sql
 SELECT tablename, tablespace FROM pg_tables WHERE schemaname = 'public';
 
@@ -102,8 +116,9 @@ SELECT tablename, tablespace FROM pg_tables WHERE schemaname = 'public';
  t2        | pg_default
 (2 rows)
 ```
+- у таблицы `t1` поле `tablespace` пустое, т.е. имеет значение `ts` - табличное пространство по умолчанию для текущей БД.
+- у таблицы `t2` поле `tablespace` имеет значение `pg_default`.
 
-Пустое поле tablespace указывает на табличное пространство по умолчанию для текущей БД, а у второй таблицы поле заполнено.
 
 Одно табличное пространство может использоваться для объектов нескольких БД.
 
@@ -345,22 +360,7 @@ SELECT spcname FROM pg_tablespace WHERE oid = (SELECT dattablespace FROM pg_data
 Табличное пространство по умолчанию определяется шаблоном, из которого клонируется новая БД.
 
 
-Символическая ссылка:
-```sql
-SELECT oid FROM pg_tablespace WHERE spcname = 'ts';
 
-  oid  
--------
- 82125
-(1 row)
-```
-
-```bash
-ls -l /var/lib/postgresql/data/pg_tblspc/
-
-total 0
-lrwxrwxrwx    1 postgres postgres        26 Apr 23 15:06 82125 -> /var/lib/postgresql/ts_dir
-```
 
 Удаление табличного пространства
 ```sql
