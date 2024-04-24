@@ -287,3 +287,98 @@ SELECT count(*) FROM pg_class WHERE reltablespace = 0;
 You are now connected to database "postgres" as user "postgres".
 ```
 
+```sql
+ALTER DATABASE appdb SET TABLESPACE pg_default;
+
+ALTER DATABASE
+```
+
+Вот теперь табличное пространство может быть удалено.
+
+```sql
+\c appdb
+
+You are now connected to database "appdb" as user "postgres".
+```
+
+```sql
+DROP TABLESPACE ts;
+
+DROP TABLESPACE
+```
+
+---
+Практика
+
+Новое табличное пространство.
+
+```sql
+CREATE TABLESPACE ts LOCATION '/var/lib/postgresql/ts_dir';
+
+CREATE TABLESPACE
+```
+
+Табличное пространство по умолчанию для `template1`:
+```sql
+ALTER DATABASE template1 SET TABLESPACE ts;
+
+ALTER DATABASE
+```
+
+Новая БД и проверка:
+```sql
+CREATE DATABASE db;
+
+CREATE DATABASE
+```
+
+```sql
+SELECT spcname FROM pg_tablespace WHERE oid = (SELECT dattablespace FROM pg_database WHERE datname = 'db');
+
+ spcname 
+---------
+ ts
+(1 row)
+```
+
+Табличное пространство по умолчанию - `ts`.
+Табличное пространство по умолчанию определяется шаблоном, из которого клонируется новая БД.
+
+
+Символическая ссылка:
+```sql
+SELECT oid FROM pg_tablespace WHERE spcname = 'ts';
+
+  oid  
+-------
+ 82125
+(1 row)
+```
+
+```bash
+ls -l /var/lib/postgresql/data/pg_tblspc/
+
+total 0
+lrwxrwxrwx    1 postgres postgres        26 Apr 23 15:06 82125 -> /var/lib/postgresql/ts_dir
+```
+
+Удаление табличного пространства
+```sql
+ALTER DATABASE template1 SET TABLESPACE pg_default;
+
+ALTER DATABASE
+```
+
+```sql
+DROP DATABASE db;
+
+DROP DATABASE
+```
+
+```sql
+DROP TABLESPACE ts;
+
+DROP TABLESPACE
+```
+
+
