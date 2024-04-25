@@ -322,31 +322,31 @@ DROP TABLESPACE ts;
 DROP TABLESPACE
 ```
 
----
-Практика
 
-Новое табличное пространство.
+## Табличное пространство у базы данных `template1`
 
+Создадим ТП:
 ```sql
 CREATE TABLESPACE ts LOCATION '/var/lib/postgresql/ts_dir';
 
 CREATE TABLESPACE
 ```
 
-Табличное пространство по умолчанию для `template1`:
+Поменяем ТП по умолчанию для БД `template1`:
 ```sql
 ALTER DATABASE template1 SET TABLESPACE ts;
 
 ALTER DATABASE
 ```
 
-Новая БД и проверка:
+Создадим новую БД `db`:
 ```sql
 CREATE DATABASE db;
 
 CREATE DATABASE
 ```
 
+Табличное пространство по умолчанию определяется шаблоном, из которого клонируется новая БД:
 ```sql
 SELECT spcname FROM pg_tablespace WHERE oid = (SELECT dattablespace FROM pg_database WHERE datname = 'db');
 
@@ -356,42 +356,36 @@ SELECT spcname FROM pg_tablespace WHERE oid = (SELECT dattablespace FROM pg_data
 (1 row)
 ```
 
-Табличное пространство по умолчанию - `ts`.
-Табличное пространство по умолчанию определяется шаблоном, из которого клонируется новая БД.
-
-
-
-
-Удаление табличного пространства
+Сменим ТП на `pg_default`:
 ```sql
 ALTER DATABASE template1 SET TABLESPACE pg_default;
 
 ALTER DATABASE
 ```
 
+Удалим БД:
 ```sql
 DROP DATABASE db;
 
 DROP DATABASE
 ```
 
+Удалим ТП:
 ```sql
 DROP TABLESPACE ts;
 
 DROP TABLESPACE
 ```
 
-Практика +
+
+## Установка `random_page_cost` для табличного пространства.
 
 Параметры `seq_page_cost` и `random_page_cost` используются планировщиком запросов
 и задают примерную стоимость чтения с диска одной страницы данных при последовательном и произвольном доступе соответственно. 
 Чем меньше соотношение между этими параметрами, тем чаще планировщик будет предпочитать индексный доступ последовательному сканированию таблицы.
 
-Установка `random_page_cost` для табличного пространства.
-
 Значения по умолчанию параметров `seq_page_cost` и `random_page_cost` больше подходят для медленных HDD-дисков.
 Предполагается, что доступ к произвольной странице данных в `4` раза дороже последовательного:
-
 ```sql
 SELECT name, setting FROM pg_settings WHERE name IN ('seq_page_cost', 'random_page_cost');
 
@@ -403,7 +397,7 @@ SELECT name, setting FROM pg_settings WHERE name IN ('seq_page_cost', 'random_pa
 ```
 
 Если используются диски с разными характеристиками, для них можно создать разные табличные пространства и настроить подходящие соотношения этих параметров.
-Например, для быстрых SSD-дисков значение `random_page_cost` можно уменьшить практически до значения `seq_page_cost`:
+Для быстрых SSD-дисков значение `random_page_cost` можно уменьшить практически до значения `seq_page_cost`:
 
 ```sql
 ALTER TABLESPACE pg_default SET (random_page_cost = 1.1);
@@ -412,7 +406,7 @@ ALTER TABLESPACE
 ```
 
 Настройки, сделанные командой `ALTER TABLESPACE`, сохраняются в таблице `pg_tablespace`.
-Их можно посмотреть в `psql` следующей командой:
+Посмотрим их в `psql` командой `\db+`:
 ```sql
 \db+
 
@@ -424,7 +418,4 @@ ALTER TABLESPACE
 (2 rows)
 ```
 
-Параметры `seq_page_cost` и `random_page_cost` можно установить и в `postgresql.conf`.
-Тогда они будут действовать для всех табличных пространств.
-
-
+Параметры `seq_page_cost` и `random_page_cost` также можно установить в `postgresql.conf`, тогда они будут действовать для всех табличных пространств.
