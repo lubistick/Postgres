@@ -72,15 +72,16 @@ lrwxrwxrwx    1 postgres postgres        26 Apr 23 15:06 82125 -> /var/lib/postg
 ```
 
 
-## Табличное пространство для базы данных
+## Табличные пространства для баз данных
 
-У каждой БД есть ТП "по умолчанию". Создадим БД и назначим ей `ts` в качестве такого пространства:
+У каждой БД есть ТП по умолчанию.
+Создадим БД `appdb` и назначим ей ТП `ts` по умолчанию:
 ```sql
 CREATE DATABASE appdb TABLESPACE ts;
 
 CREATE DATABASE
 ```
-Теперь все созданные таблицы и индексы будут попадать в `ts`, если явно не указать другое.
+Теперь все созданные таблицы и индексы будут попадать в ТП `ts`, если явно не указать другое.
 
 Подключимся к БД:
 ```sql
@@ -96,10 +97,7 @@ CREATE TABLE t1(id serial, name text);
 CREATE TABLE
 ```
 
-
-### Табличное пространство для таблицы
-
-Создадим еще одну таблицу в другом табличном пространстве:
+Создадим еще одну таблицу в другом ТП `pg_default`:
 ```sql
 CREATE TABLE t2(id serial, name text) TABLESPACE pg_default;
 
@@ -121,6 +119,7 @@ SELECT tablename, tablespace FROM pg_tables WHERE schemaname = 'public';
 
 
 Одно табличное пространство может использоваться для объектов нескольких БД.
+Создадим БД `configdb` с ТП `pg_default`:
 
 ```sql
 CREATE DATABASE configdb;
@@ -136,6 +135,7 @@ CREATE DATABASE
 You are now connected to database "configdb" as user "postgres".
 ```
 
+Создадим таблицу в ТП `ts`:
 ```sql
 CREATE TABLE t(n integer) TABLESPACE ts;
 
@@ -143,9 +143,9 @@ CREATE TABLE
 ```
 
 
-## Управление объектами в табличных пространствах
+## Перемещение объектов в другие табличные пространства
 
-Таблицы и индексы можно перемещать между табличными пространствами.
+Таблицы и индексы можно перемещать между ТП.
 Это физическая операция - файлы копируются из одного каталога в другой.
 Таблица блокируется, пока выполняется операция.
 
@@ -155,6 +155,10 @@ CREATE TABLE
 You are now connected to database "appdb" as user "postgres".
 ```
 
+
+### Перемещение таблицы
+
+Переместим таблицу `t1` в из ТП `ts` в `pg_default`:
 ```sql
 ALTER TABLE t1 SET TABLESPACE pg_default;
 
@@ -172,7 +176,9 @@ SELECT tablename, tablespace FROM pg_tables WHERE schemaname = 'public';
 ```
 
 
-Можно переместить и все объекты из одного табличного пространства в другое:
+### Перемещение всех объектов табличного пространства
+
+Переместим все объекты из ТП `pg_default` в `ts`:
 ```sql
 ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE ts;
 
@@ -192,8 +198,7 @@ SELECT tablename, tablespace FROM pg_tables WHERE schemaname = 'public';
 
 ## Размер табличного пространства
 
-Мы уже рассматривали, как узнать объем, занимаемый базой данных.
-Объем можно посмотреть и в разрезе табличных пространств:
+Посмотрим объем ТП `ts`:
 ```sql
 SELECT pg_size_pretty(pg_tablespace_size('ts'));
 
@@ -203,14 +208,14 @@ SELECT pg_size_pretty(pg_tablespace_size('ts'));
 (1 row)
 ```
 
-Почему такой размер, если в табличном пространстве всего несколько пустых таблиц?
-Поскольку `ts` является табличным пространством по умолчанию для базы `appdb`, в нем хранятся объекты системного каталога.
+Почему такой размер ТП, если в нем всего несколько пустых таблиц?
+Поскольку `ts` является ТП по умолчанию для базы `appdb`, в нем хранятся объекты системного каталога.
 Они и занимают место.
 
 
 ## Удаление табличного пространства
 
-Табличное пространство можно удалить, но только в том случае, если оно пустое.
+Попробуем удалить ТП:
 
 ```sql
 DROP TABLESPACE ts;
@@ -218,13 +223,11 @@ DROP TABLESPACE ts;
 ERROR:  tablespace "ts" is not empty
 ```
 
-В отличие от удаления схемы, в команде `DROP TABLESPACE` нельзя использовать фразу `CASCADE`:
-объекты табличного пространства могут принадлежать разным БД, а подключены мы только к одной.
+ТП можно удалить, только если оно пустое.
+В команде `DROP TABLESPACE` нельзя использовать фразу `CASCADE`, т.к. объекты ТП могут принадлежать разным БД, а подключены мы только к одной.
+Выясним, в каких БД есть зависимые объекты.
 
-Но можно выяснить, в каких БД есть зависимые объекты.
-В этом нам поможет системный каталог.
-Сначала узнаем и запомним `OID` табличного пространства:
-
+Узнаем `OID` ТП:
 ```sql
 SELECT oid FROM pg_tablespace WHERE spcname = 'ts';
 
@@ -234,11 +237,12 @@ SELECT oid FROM pg_tablespace WHERE spcname = 'ts';
 (1 row)
 ```
 
+Запомним `OID` в переменную `psql`:
 ```sql
 SELECT oid AS tsoid FROM pg_tablespace WHERE spcname = 'ts' \gset
 ```
 
-Затем получим список БД, в которых есть объекты из удаляемого пространства:
+Посмотрим список БД, в которых есть объекты из удаляемого ТП:
 ```sql
 SELECT datname FROM pg_database WHERE oid IN (SELECT pg_tablespace_databases(:tsoid));
 
@@ -249,13 +253,14 @@ SELECT datname FROM pg_database WHERE oid IN (SELECT pg_tablespace_databases(:ts
 (2 rows)
 ```
 
-Дальше подключаемся к каждой БД и получаем список объектов из `pg_class`:
+Подключимся сначала к БД `configdb`:
 ```sql
 \c configdb
 
 You are now connected to database "configdb" as user "postgres".
 ```
 
+Получим список объектов из `pg_class`:
 ```sql
 SELECT relnamespace::regnamespace, relname, relkind FROM pg_class WHERE reltablespace = :tsoid;
 
@@ -265,22 +270,22 @@ SELECT relnamespace::regnamespace, relname, relkind FROM pg_class WHERE reltable
 (1 row)
 ```
 
-Таблица `t` больше не нужна, удалим ее:
+Тут только одна таблица `t`. Удалим ее:
 ```sql
 DROP TABLE t;
 
 DROP TABLE
 ```
 
-И вторая БД.
-Но поскольку `ts` является табличным пространством по умолчанию, у объектов в `pg_class` поле содержит ноль:
-
+Теперь подключимся к БД `appdb`:
 ```sql
 \c appdb
 
 You are now connected to database "appdb" as user "postgres".
 ```
 
+ТП `ts` выбрано по умолчанию в БД `appdb`, поэтому ищем объекты в `pg_class`, где поле `reltablespace` содержит `0`.
+Это объекты системного каталога:
 ```sql
 SELECT count(*) FROM pg_class WHERE reltablespace = 0;
 
@@ -290,25 +295,19 @@ SELECT count(*) FROM pg_class WHERE reltablespace = 0;
 (1 row)
 ```
 
-Это как нам уже известно, объекты системного каталога.
-
-Табличное пространство по умолчанию можно сменить.
-При этом все таблицы из старого пространства физически переносятся в новое.
-Предварительно надо отключиться от БД:
-
+Отключимся от БД, чтобы сменить ТП по умолчанию:
 ```sql
 \c postgres
 
 You are now connected to database "postgres" as user "postgres".
 ```
 
+Меняем. При этом все таблицы из старого ТП физически переносятся в новое:
 ```sql
 ALTER DATABASE appdb SET TABLESPACE pg_default;
 
 ALTER DATABASE
 ```
-
-Вот теперь табличное пространство может быть удалено.
 
 ```sql
 \c appdb
@@ -316,6 +315,7 @@ ALTER DATABASE
 You are now connected to database "appdb" as user "postgres".
 ```
 
+Теперь удалим ТП:
 ```sql
 DROP TABLESPACE ts;
 
