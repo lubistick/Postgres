@@ -62,6 +62,69 @@ SELECT relfilenode FROM pg_class WHERE relname = 't';
 
 Тем и удобна функция, что выдает готовый путь без необходимости выполнять несколько запросов к системному каталогу.
 
+Посмотрим на файлы:
+```bash
+ls -l /var/lib/postgresql/data/base/82127/82129*
+
+-rw-------    1 postgres postgres    450560 Apr 27 12:25 /var/lib/postgresql/data/base/82127/82129
+-rw-------    1 postgres postgres     24576 Apr 27 12:25 /var/lib/postgresql/data/base/82127/82129_fsm
+-rw-------    1 postgres postgres      8192 Apr 27 12:25 /var/lib/postgresql/data/base/82127/82129_vm
+```
+
+Мы видим 3 слоя:
+- основной
+- карта свободного пространства (`fsm`)
+- карта видимости (`vm`)
+
+Аналогично можно посмотреть на файлы индекса:
+```sql
+\d t
+
+                            Table "public.t"
+ Column |  Type   | Collation | Nullable |            Default
+--------+---------+-----------+----------+-------------------------------
+ id     | integer |           | not null | nextval('t_id_seq'::regclass)
+ n      | numeric |           |          |
+Indexes:
+    "t_pkey" PRIMARY KEY, btree (id)
+```
+
+```sql
+SELECT pg_relation_filepath('t_pkey');
+
+ pg_relation_filepath 
+----------------------
+ base/82127/82135
+(1 row)
+```
+
+```bash
+ls -l /var/lib/postgresql/data/base/82127/82135*
+
+-rw-------    1 postgres postgres    245760 Apr 27 12:25 /var/lib/postgresql/data/base/82127/82135
+```
+
+И на файлы последовательности:
+```sql
+SELECT pg_relation_filepath('t_id_seq');
+
+ pg_relation_filepath 
+----------------------
+ base/82127/82128
+(1 row)
+```
+
+```bash
+ls -l /var/lib/postgresql/data/base/82127/82128*
+
+-rw-------    1 postgres postgres      8192 Apr 27 12:25 /var/lib/postgresql/data/base/82127/82128
+```
+
+
+Существует полезное расширение `oid2name`, входящее в стандартную поставку,
+с помощью которого можно легко связать объекты БД и файлы.
+
+Можно посмотреть все БД:
 
 
 
