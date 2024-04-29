@@ -268,6 +268,140 @@ ALTER TABLE
 
 Эта операция не меняет существующие данные в таблице, но определяет стратегию работы с новыми данными.
 
+ПРАКТИКА
+
+Нежурналируемая таблица
+
+```sql
+CREATE TABLESPACE ts LOCATION '/var/lib/postgresql/ts_dir';
+
+CREATE TABLESPACE
+```
+
+```sql
+CREATE UNLOGGED TABLE u(n integer) TABLESPACE ts;
+
+CREATE TABLE
+```
+
+```sql
+INSERT INTO u(n) SELECT n FROM generate_series(1, 1000) n;
+
+INSERT 0 1000
+```
+
+```sql
+SELECT pg_relation_filepath('u');
+
+            pg_relation_filepath             
+---------------------------------------------
+ pg_tblspc/90320/PG_14_202107181/82127/90321
+(1 row)
+```
+
+Посмотрим на файлы таблицы.
+
+```bash
+echo $PGDATA
+
+/var/lib/postgresql/data
+```
+
+Для таблицы существует слой `init`:
+
+```bash
+ls -l /var/lib/postgresql/data/pg_tblspc/90320/PG_14_202107181/82127/90321*
+
+-rw-------    1 postgres postgres     40960 Apr 29 11:35 /var/lib/postgresql/data/pg_tblspc/90320/PG_14_202107181/82127/90321
+-rw-------    1 postgres postgres     24576 Apr 29 11:35 /var/lib/postgresql/data/pg_tblspc/90320/PG_14_202107181/82127/90321_fsm
+-rw-------    1 postgres postgres         0 Apr 29 11:33 /var/lib/postgresql/data/pg_tblspc/90320/PG_14_202107181/82127/90321_init
+```
+
+Удалим созданное ТП:
+```sql
+DROP TABLE u;
+
+DROP TABLE
+```
+
+```sql
+DROP TABLESPACE ts;
+
+DROP TABLESPACE
+```
+
+
+Работа с текстовым столбцом.
+
+```sql
+CREATE TABLE t(s text);
+
+CREATE TABLE
+```
+
+```sql
+\d+ t
+
+                                           Table "public.t"
+ Column | Type | Collation | Nullable | Default | Storage  | Compression | Stats target | Description
+--------+------+-----------+----------+---------+----------+-------------+--------------+-------------
+ s      | text |           |          |         | extended |             |              |
+Access method: heap
+```
+
+По умолчанию для типа `text` используется стратегия `extended`.
+Изменим стратегию на `external`:
+
+```sql
+ALTER TABLE t ALTER COLUMN s SET STORAGE external;
+
+ALTER TABLE
+```
+
+```sql
+INSERT INTO t(s) VALUES ('Короткая строка.');
+
+INSERT 0 1
+```
+
+```sql
+INSERT INTO t(s) VALUES (repeat('А', 3456));
+
+INSERT 0 1
+```
+
+Проверим TOAST-таблицу:
+```sql
+SELECT relname FROM pg_class WHERE oid = (SELECT reltoastrelid FROM pg_class WHERE relname = 't');
+
+    relname     
+----------------
+ pg_toast_90324
+(1 row)
+```
+
+TOAST-таблица "спрятана", т.к. находится в схеме, которой нет в пути поиска.
+И это правильно, поскольку TOAST работает прозрачно для пользователя.
+Но заглянуть в таблицу все-таки можно:
+
+```sql
+SELECT chunk_id, chunk_seq, length(chunk_data) FROM pg_toast.pg_toast_90324 ORDER BY chunk_id, chunk_seq;
+
+ chunk_id | chunk_seq | length 
+----------+-----------+--------
+    90329 |         0 |   1996
+    90329 |         1 |   1996
+    90329 |         2 |   1996
+    90329 |         3 |    924
+(4 rows)
+```
+
+Повторяющаяся буква `А` русская, поэтому занимает `2` байта: `(1996 + 1996 + 1996 + 924) / 2 = 3456`
+
+Видно, что в TOAST таблицу попала только одна длинная строка (общий размер совпадает с длиной строки).
+Короткая строка не вынесена в TOAST просто потому, что в этом нет необходимости - версия строки и без этого помещается в страницу.
+
+
 
 
 
