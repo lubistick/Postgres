@@ -402,7 +402,68 @@ SELECT chunk_id, chunk_seq, length(chunk_data) FROM pg_toast.pg_toast_90324 ORDE
 Короткая строка не вынесена в TOAST просто потому, что в этом нет необходимости - версия строки и без этого помещается в страницу.
 
 
+Сравнение размеров БД и таблиц в ней
 
+```sql
+CREATE DATABASE data_lowlevel;
 
+CREATE DATABASE
+```
 
+```sql
+\c data_lowlevel
+
+You are now connected to database "data_lowlevel" as user "postgres".
+```
+
+Даже пустая БД содержит таблицы, относящиеся к системному каталогу.
+Полный список отношений можно получить из таблицы `pg_class`.
+Из выборки надо исключить:
+- таблицы, общие для всего кластера (они не относятся к текущей БД)
+- индексы и TOAST-таблицы (они будут автоматически учтены при подсчете размера)
+
+```sql
+SELECT sum(pg_total_relation_size(oid)) FROM pg_class WHERE NOT relisshared AND relkind = 'r';
+
+   sum   
+---------
+ 8626176
+(1 row)
+```
+
+Размер БД оказывается несколько больше:
+```sql
+SELECT pg_database_size('data_lowlevel');
+
+ pg_database_size 
+------------------
+          8782627
+(1 row)
+```
+
+Дело в том, что функция `pg_database_size` возвращает размер каталога файловой системы, а в этом каталоге находятся несколько служебных файлов.
+
+```sql
+SELECT oid FROM pg_database WHERE datname = 'data_lowlevel';
+
+  oid  
+-------
+ 98511
+(1 row)
+```
+
+```bash
+ls -l /var/lib/postgresql/data/base/98511/[^0-9]*
+
+-rw-------    1 postgres postgres         3 Apr 29 15:16 /var/lib/postgresql/data/base/98511/PG_VERSION
+-rw-------    1 postgres postgres       512 Apr 29 15:16 /var/lib/postgresql/data/base/98511/pg_filenode.map
+-rw-------    1 postgres postgres    155936 Apr 29 15:16 /var/lib/postgresql/data/base/98511/pg_internal.init
+```
+
+- `pg_filenode.map` - отображение `oid` некоторых таблиц и имена файлов
+- `pg_internal.init` - кеш системного каталога
+- `PG_VERSION` - версия `Postgres`
+
+Из-за того, что одни функции работают на уровне объектов БД, а другие на уровне файловой системы, бывает сложно точно сопоставить возвращаемые размеры.
+Это относится и к функции `pg_tablespace_size`.
 
