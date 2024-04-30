@@ -1,16 +1,13 @@
 # Низкий уровень
 
-Объект представлен несколькими слоями.
-
+Каждый объект БД представлен несколькими слоями.
 Слой состоит из одного или нескольких файлов-сегментов.
+Сегменты разбиты на страницы, которые попадают в [буферный кеш](wal.md) при работе.
 
-Каждый файл разбит на страницы (они помещаются в буферный кеш при работе).
 
-Для длинных версий строк используется TOAST.
+## Расположение слоев
 
-## Расположение файлов
-
-Посмотрим на файлы, принадлежащие таблице:
+Создадим БД и подключимся к ней:
 ```sql
 CREATE DATABASE data_lowlevel;
 
@@ -23,20 +20,23 @@ CREATE DATABASE
 You are now connected to database "data_lowlevel" as user "postgres".
 ```
 
+Создадим таблицу `t` и вставим `10 000` строк:
 ```sql
 CREATE TABLE t(id serial PRIMARY KEY, n numeric);
 
 CREATE TABLE
 ```
 
-Вставим `10 000` строк:
 ```sql
 INSERT INTO t(n) SELECT g.id FROM generate_series(1, 10000) AS g(id);
 
 INSERT 0 10000
 ```
 
-Базовое имя файла относительно PGDATA можно получить функцией:
+
+### Слои таблицы
+
+Получим базовое имя слоев таблицы относительно каталога `PGDATA`:
 ```sql
 SELECT pg_relation_filepath('t');
 
@@ -46,31 +46,15 @@ SELECT pg_relation_filepath('t');
 (1 row)
 ```
 
-Поскольку таблица находится в табличном пространстве `pg_default`, имя начинается на `base`.
-Затем идет каталог для БД:
+Посмотрим переменную `PGDATA`:
+```bash
+echo $PGDATA
 
-```sql
-SELECT oid FROM pg_database WHERE datname = 'data_lowlevel';
-
-  oid  
--------
- 82127
-(1 row)
+/var/lib/postgresql/data
 ```
 
-Затем собственно имя файла. Его можно узнать следующим образом:
-```sql
-SELECT relfilenode FROM pg_class WHERE relname = 't';
+Посмотрим на слои:
 
- relfilenode 
--------------
-       82129
-(1 row)
-```
-
-Тем и удобна функция, что выдает готовый путь без необходимости выполнять несколько запросов к системному каталогу.
-
-Посмотрим на файлы:
 ```bash
 ls -l /var/lib/postgresql/data/base/82127/82129*
 
@@ -79,12 +63,28 @@ ls -l /var/lib/postgresql/data/base/82127/82129*
 -rw-------    1 postgres postgres      8192 Apr 27 12:25 /var/lib/postgresql/data/base/82127/82129_vm
 ```
 
-Мы видим 3 слоя:
 - основной
-- карта свободного пространства (`fsm`)
-- карта видимости (`vm`)
+- карта свободного пространства (`_fsm`)
+- карта видимости (`_vm`)
 
-Аналогично можно посмотреть на файлы индекса:
+Посмотрим с помощью функции `pg_relation_size` размер слоев:
+```sql
+SELECT
+  pg_relation_size('t', 'main') main,
+  pg_relation_size('t', 'fsm') fsm,
+  pg_relation_size('t', 'vm') vm
+;
+
+  main  |  fsm  |  vm  
+--------+-------+------
+ 450560 | 24576 | 8192
+(1 row)
+```
+
+
+### Слои индекса
+
+Посмотрим информацию о таблице:
 ```sql
 \d t
 
@@ -97,6 +97,7 @@ Indexes:
     "t_pkey" PRIMARY KEY, btree (id)
 ```
 
+Посмотрим базовое имя слоев индекса относительно `PGDATA`:
 ```sql
 SELECT pg_relation_filepath('t_pkey');
 
@@ -106,13 +107,27 @@ SELECT pg_relation_filepath('t_pkey');
 (1 row)
 ```
 
+Посмотрим на слои:
 ```bash
 ls -l /var/lib/postgresql/data/base/82127/82135*
 
 -rw-------    1 postgres postgres    245760 Apr 27 12:25 /var/lib/postgresql/data/base/82127/82135
 ```
 
-И на файлы последовательности:
+Посмотрим размер индексов таблицы с помощью функции `pg_indexes_size`:
+```sql
+SELECT pg_indexes_size('t');
+
+ pg_indexes_size 
+-----------------
+          245760
+(1 row)
+```
+
+
+### Слои последовательности
+
+Посмотрим базовое имя слоев последовательности относительно `PGDATA`:
 ```sql
 SELECT pg_relation_filepath('t_id_seq');
 
@@ -122,6 +137,7 @@ SELECT pg_relation_filepath('t_id_seq');
 (1 row)
 ```
 
+Посмотрим на слои:
 ```bash
 ls -l /var/lib/postgresql/data/base/82127/82128*
 
@@ -129,19 +145,7 @@ ls -l /var/lib/postgresql/data/base/82127/82128*
 ```
 
 
-## Размер объектов и слоев
-
-Размер каждого из файлов, входящих в слой, можно, конечно, посмотреть в файловой системе, но существуют и специальные функции.
-
-Размер каждого слоя в отдельности:
-```sql
-SELECT pg_relation_size('t', 'main') main, pg_relation_size('t', 'fsm') fsm, pg_relation_size('t', 'vm') vm;
-
-  main  |  fsm  |  vm  
---------+-------+------
- 450560 | 24576 | 8192
-(1 row)
-```
+## Размер объектов
 
 Размер таблицы без индексов (сумма всех слоев):
 ```sql
@@ -150,16 +154,6 @@ SELECT pg_table_size('t');
  pg_table_size 
 ---------------
         491520
-(1 row)
-```
-
-Размер индексов таблицы:
-```sql
-SELECT pg_indexes_size('t');
-
- pg_indexes_size 
------------------
-          245760
 (1 row)
 ```
 
@@ -175,6 +169,9 @@ SELECT pg_total_relation_size('t');
 
 
 ## TOAST
+
+Любая версия строки в `Postgres` должна целиком помещаться на одну страницу.
+Для "длинных" версий строк применяется технология TOAST - The Oversized Attribute Storage Technique.
 
 В таблице `t` есть столбец типа `numeric`.
 Этот тип может работать с очень большими числами. Например, с такими:
@@ -268,6 +265,8 @@ ALTER TABLE
 
 Эта операция не меняет существующие данные в таблице, но определяет стратегию работы с новыми данными.
 
+
+
 ПРАКТИКА
 
 Нежурналируемая таблица
@@ -300,12 +299,6 @@ SELECT pg_relation_filepath('u');
 ```
 
 Посмотрим на файлы таблицы.
-
-```bash
-echo $PGDATA
-
-/var/lib/postgresql/data
-```
 
 Для таблицы существует слой `init`:
 
