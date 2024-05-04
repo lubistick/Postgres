@@ -34,9 +34,9 @@ INSERT 0 10000
 ```
 
 
-### Слои таблицы
+### Файлы таблицы
 
-Получим базовое имя слоев таблицы относительно каталога `PGDATA`:
+Получим расположение файлов таблицы относительно каталога `PGDATA`:
 ```sql
 SELECT pg_relation_filepath('t');
 
@@ -82,7 +82,49 @@ SELECT
 ```
 
 
-### Слои индекса
+## Файлы нежурналируемой таблицы
+
+Создадим нежурналируемую таблицу:
+```sql
+CREATE UNLOGGED TABLE u(n integer);
+    
+CREATE TABLE
+```
+
+Вставим строки:
+```sql
+INSERT INTO u(n) SELECT n FROM generate_series(1, 1000) n;
+
+INSERT 0 1000
+```
+
+Посмотрим расположение файлов относительно `PGDATA`:
+```sql
+SELECT pg_relation_filepath('u');
+
+ pg_relation_filepath 
+----------------------
+ base/98511/106703
+(1 row)
+```
+
+Для нежурналируемой таблицы существует слой `_init`:
+```bash
+ls -l /var/lib/postgresql/data/base/98511/106703*
+
+-rw-------    1 postgres postgres     40960 May  4 14:34 /var/lib/postgresql/data/base/98511/106703
+-rw-------    1 postgres postgres     24576 May  4 14:34 /var/lib/postgresql/data/base/98511/106703_fsm
+-rw-------    1 postgres postgres         0 May  4 14:33 /var/lib/postgresql/data/base/98511/106703_init
+```
+
+Слой `_init` существует только для нежурналируемых таблиц и их индексов.
+Т.е. действия с такими объектами не записываются в [журнал предварительной записи](wal.md).
+Поэтому работа с ними происходит быстрее, но в случае сбоя их содержимое невозможно восстановить.
+При восстановлении `Postgres` просто удаляет все слои и записывает слой инициализации на место основного слоя.
+Получается пустая таблица.
+
+
+### Файлы индекса
 
 Посмотрим информацию о таблице:
 ```sql
@@ -97,7 +139,7 @@ Indexes:
     "t_pkey" PRIMARY KEY, btree (id)
 ```
 
-Посмотрим базовое имя слоев индекса относительно `PGDATA`:
+Посмотрим расположение файлов относительно `PGDATA`:
 ```sql
 SELECT pg_relation_filepath('t_pkey');
 
@@ -125,9 +167,9 @@ SELECT pg_indexes_size('t');
 ```
 
 
-### Слои последовательности
+### Файлы последовательности
 
-Посмотрим базовое имя слоев последовательности относительно `PGDATA`:
+Посмотрим расположение файлов относительно `PGDATA`:
 ```sql
 SELECT pg_relation_filepath('t_id_seq');
 
@@ -269,59 +311,6 @@ ALTER TABLE
 
 ПРАКТИКА
 
-Нежурналируемая таблица
-
-```sql
-CREATE TABLESPACE ts LOCATION '/var/lib/postgresql/ts_dir';
-
-CREATE TABLESPACE
-```
-
-```sql
-CREATE UNLOGGED TABLE u(n integer) TABLESPACE ts;
-
-CREATE TABLE
-```
-
-```sql
-INSERT INTO u(n) SELECT n FROM generate_series(1, 1000) n;
-
-INSERT 0 1000
-```
-
-```sql
-SELECT pg_relation_filepath('u');
-
-            pg_relation_filepath             
----------------------------------------------
- pg_tblspc/90320/PG_14_202107181/82127/90321
-(1 row)
-```
-
-Посмотрим на файлы таблицы.
-
-Для таблицы существует слой `init`:
-
-```bash
-ls -l /var/lib/postgresql/data/pg_tblspc/90320/PG_14_202107181/82127/90321*
-
--rw-------    1 postgres postgres     40960 Apr 29 11:35 /var/lib/postgresql/data/pg_tblspc/90320/PG_14_202107181/82127/90321
--rw-------    1 postgres postgres     24576 Apr 29 11:35 /var/lib/postgresql/data/pg_tblspc/90320/PG_14_202107181/82127/90321_fsm
--rw-------    1 postgres postgres         0 Apr 29 11:33 /var/lib/postgresql/data/pg_tblspc/90320/PG_14_202107181/82127/90321_init
-```
-
-Удалим созданное ТП:
-```sql
-DROP TABLE u;
-
-DROP TABLE
-```
-
-```sql
-DROP TABLESPACE ts;
-
-DROP TABLESPACE
-```
 
 
 Работа с текстовым столбцом.
