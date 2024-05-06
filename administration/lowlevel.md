@@ -135,6 +135,8 @@ ls -l /var/lib/postgresql/data/base/98511/106703*
 -rw-------    1 postgres postgres         0 May  4 14:33 /var/lib/postgresql/data/base/98511/106703_init
 ```
 
+- `106703` - основной слой
+- `106703_fsm` - карта свободного пространства
 - `106703_init` - слой инициализации
 
 
@@ -234,10 +236,10 @@ ls -l /var/lib/postgresql/data/base/82127/82128*
 Получается пустая таблица.
 
 
-## TOAST
+## Файлы TOAST-таблицы
 
 Любая версия строки в `Postgres` должна целиком помещаться на одну страницу.
-Для "длинных" версий строк применяется технология TOAST - The Oversized Attribute Storage Technique.
+Для "длинных" версий строк применяется технология `TOAST` или `The oversized attribute storage technique`.
 
 В таблице `t` есть столбец типа `numeric`.
 Этот тип может работать с очень большими числами. Например, с такими:
@@ -250,7 +252,7 @@ SELECT length((123456789::numeric ^ 12345::numeric)::text);
 (1 row)
 ```
 
-При этом, если вставить такое значение в таблицу, размер файлов не изменится:
+Посмотрим размер основного слоя таблицы `t`:
 ```sql
 SELECT pg_relation_size('t', 'main');
 
@@ -260,12 +262,14 @@ SELECT pg_relation_size('t', 'main');
 (1 row)
 ```
 
+Вставим в нее очень большое число:
 ```sql
 INSERT INTO t(n) SELECT 123456789::numeric ^ 12345::numeric;
 
 INSERT 0 1
 ```
 
+Видим, что размер файлов не изменился:
 ```sql
 SELECT pg_relation_size('t', 'main');
 
@@ -278,7 +282,7 @@ SELECT pg_relation_size('t', 'main');
 Поскольку версия строки не помещается на одну страницу, она храниться в отдельной TOAST-таблице.
 TOAST-таблица и индекс к ней создаются автоматически для каждой таблицы, в которой есть потенциально "длинный" тип данных, и используется по необходимости.
 
-Имя и идентификатор такой таблицы можно найти следующим образом:
+Найдем имя и идентификатор TOAST-таблицы:
 ```sql
 SELECT relname, relfilenode FROM pg_class WHERE oid = (
   SELECT reltoastrelid FROM pg_class WHERE relname = 't'
@@ -290,7 +294,7 @@ SELECT relname, relfilenode FROM pg_class WHERE oid = (
 (1 row)
 ```
 
-Вот и файлы TOAST-таблицы:
+Посмотрим файлы TOAST-таблицы:
 
 ```bash
 ls -l /var/lib/postgresql/data/base/82127/82133*
@@ -332,13 +336,9 @@ ALTER TABLE
 Эта операция не меняет существующие данные в таблице, но определяет стратегию работы с новыми данными.
 
 
+## Посмотрим в TOAST-таблицу
 
-ПРАКТИКА
-
-
-
-Работа с текстовым столбцом.
-
+Создадим таблицу `t` с текстовым столбцом:
 ```sql
 CREATE TABLE t(s text);
 
@@ -357,7 +357,6 @@ Access method: heap
 
 По умолчанию для типа `text` используется стратегия `extended`.
 Изменим стратегию на `external`:
-
 ```sql
 ALTER TABLE t ALTER COLUMN s SET STORAGE external;
 
@@ -408,7 +407,7 @@ SELECT chunk_id, chunk_seq, length(chunk_data) FROM pg_toast.pg_toast_90324 ORDE
 Короткая строка не вынесена в TOAST просто потому, что в этом нет необходимости - версия строки и без этого помещается в страницу.
 
 
-Сравнение размеров БД и таблиц в ней
+## Сравнение размеров БД и таблиц в ней
 
 ```sql
 CREATE DATABASE data_lowlevel;
