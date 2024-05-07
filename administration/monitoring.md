@@ -389,5 +389,70 @@ SELECT pid, backend_type, backend_start, state FROM pg_stat_activity;
 ```
 
 
+## Анализ журнала сервера
+
+```sql
+select pg_current_logfile();
+
+          pg_current_logfile          
+--------------------------------------
+ log/postgresql-2024-05-07_140148.log
+(1 row)
+```
+
+```bash
+grep FATAL /var/lib/postgresql/data/log/postgresql-2024-05-07_140148.log | tail -n 1
+
+2024-05-07 20:21:56.016 UTC [114] FATAL:  terminating connection due to administrator command
+```
+
+Сообщение `terminating connection` вызвано тем, что мы завершали блокирующий процесс.
+
+
+Обычное применение журнала - анализ наиболее продолжительных запросов.
+Добавим к строкам журнала номер процесса и включим вывод команд и времени их выполнения:
+```sql
+ALTER SYSTEM SET log_min_duration_statement = 0;
+
+ALTER SYSTEM
+```
+Это означает, что абсолютно все команды будут попадать в журнал.
+
+```sql
+ALTER SYSTEM SET log_line_prefix = '(pid=%p) ';
+
+ALTER SYSTEM
+```
+
+```sql
+SELECT pg_reload_conf();
+
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+```
+
+Теперь выполним какую-нибудь команду:
+```sql
+SELECT sum(random()) FROM generate_series(1,1000000);
+
+        sum        
+-------------------
+ 499925.5793404646
+(1 row)
+```
+
+И посмотрим на последнюю строку в журнале:
+```bash
+tail -n 1 /var/lib/postgresql/data/log/postgresql-2024-05-07_140148.log
+
+(pid=370) LOG:  duration: 252.063 ms  statement: SELECT sum(random()) FROM generate_series(1,1000000);
+```
+
+Для полноценного мониторинга требуется внешняя система.
+
+
+
 
 
