@@ -235,6 +235,159 @@ stats_reset           | 2024-05-07 14:19:12.208774+00
 - `buffers_bachend` - количество страниц, записанных серверными процессами
 
 
+## Текущие активности
+
+Воспроизведем сценарий, в котором один процесс блокирует выполнение другого,
+и попробуем разобраться в ситуации с помощью системных представлений.
+Создадим таблицу с одной строкой:
+```sql
+CREATE TABLE t(n integer);
+
+CREATE TABLE
+```
+
+```sql
+INSERT INTO t VALUES(42);
+
+INSERT 0 1
+```
+
+Запустим два сеанса, один из которых изменяет таблицу и ничего не делает:
+```sql
+BEGIN;
+
+BEGIN
+```
+
+```sql
+UPDATE t SET n = n + 1;
+
+UPDATE 1
+```
+
+А второй пытается изменить ту же строку и блокируется:
+```bash
+psql -U postgres -d admin_monitoring
+```
+
+```sql
+UPDATE t SET n = n + 2;
+```
+
+Посмотрим информацию об обслуживающих процессах:
+```sql
+SELECT pid, query, state, wait_event, wait_event_type, pg_blocking_pids(pid) FROM pg_stat_activity WHERE backend_type = 'client backend' \gx
+-[ RECORD 1 ]----+------------------------------------------------------------------------------------------------------------------------------------------
+pid              | 355                                                                                                                                      
+query            | UPDATE t SET n = n + 2;                                                                                                                  
+state            | active                                                                                                                                   
+wait_event       | transactionid                                                                                                                            
+wait_event_type  | Lock
+pg_blocking_pids | {114}
+-[ RECORD 2 ]----+------------------------------------------------------------------------------------------------------------------------------------------
+pid              | 114
+query            | UPDATE t SET n = n + 1;
+state            | idle in transaction
+wait_event       | ClientRead
+wait_event_type  | Client
+pg_blocking_pids | {}
+-[ RECORD 3 ]----+------------------------------------------------------------------------------------------------------------------------------------------
+pid              | 370
+query            | SELECT pid, query, state, wait_event, wait_event_type, pg_blocking_pids(pid) FROM pg_stat_activity WHERE backend_type = 'client backend'
+state            | active
+wait_event       |
+wait_event_type  |
+pg_blocking_pids | {}
+```
+
+Состояние `idle in transaction` означает, что сеанс начал транзакцию, но в настоящее время ничего не делает, а транзакция осталась незавершенной.
+Это может стать проблемой, если ситуация возникает систематически, например, из-за некорректной реализации приложения или из-за ошибок в драйвере, поскольку открытый сеанс расходует оперативную память.
+
+Покажем как завершить сеанс вручную.
+Запомним номер заблокированного процесса:
+```sql
+SELECT pid AS blocked_pid FROM pg_stat_activity WHERE backend_type = 'client backend' AND cardinality(pg_blocking_pids(pid)) > 0 \gset
+```
+
+В `Postgres` версии ниже `9.6` нет функции `pg_blocking_pids(<ID_процесса>)`, но блокирующий процесс можно вычислить, используя запросы к таблице блокировок.
+Запрос покажет две строки: одна транзакция получила блокировку (`granted`), другая - нет и ожидает:
+```sql
+SELECT locktype, transactionid, pid, mode, granted FROM pg_locks WHERE transactionid IN (SELECT transactionid FROM pg_locks WHERE pid = :blocked_pid AND NOT granted);
+
+   locktype    | transactionid | pid |     mode      | granted 
+---------------+---------------+-----+---------------+---------
+ transactionid |          7677 | 114 | ExclusiveLock | t
+ transactionid |          7677 | 355 | ShareLock     | f
+(2 rows)
+```
+
+В общем случае нужно аккуратно учитывать тип блокировки.
+
+Выполнение запроса можно прервать функцией `pg_cancel_backend`.
+В нашем случае транзакция простаивает, так что просто прерываем сеанс, вызвав `pg_terminate_backend`:
+```sql
+SELECT pg_terminate_backend(b.pid) FROM unnest(pg_blocking_pids(:blocked_pid)) AS b(pid);
+
+ pg_terminate_backend 
+----------------------
+ t
+(1 row)
+```
+
+Функция `unnest` нужна, поскольку `pg_blocking_pids` возвращает массив идентификаторов процессов, блокирующих искомый серверный процесс.
+В нашем примере блокирующий процесс один, но в общем случае их может быть несколько.
+
+Проверим состояние серверных процессов:
+```sql
+SELECT pid, query, state, wait_event, wait_event_type, pg_blocking_pids(pid) FROM pg_stat_activity WHERE backend_type = 'client backend' \gx
+
+-[ RECORD 1 ]----+------------------------------------------------------------------------------------------------------------------------------------------
+pid              | 355
+query            | UPDATE t SET n = n + 2;
+state            | idle
+wait_event       | ClientRead
+wait_event_type  | Client
+pg_blocking_pids | {}
+-[ RECORD 2 ]----+------------------------------------------------------------------------------------------------------------------------------------------
+pid              | 370
+query            | SELECT pid, query, state, wait_event, wait_event_type, pg_blocking_pids(pid) FROM pg_stat_activity WHERE backend_type = 'client backend'
+state            | active
+wait_event       |
+wait_event_type  |
+pg_blocking_pids | {}
+```
+
+Осталось только два, причем заблокированный успешно завершил транзакцию.
+Если в первом терминале попробовать закоммитить изменения:
+```sql
+COMMIT;
+
+FATAL:  terminating connection due to administrator command
+server closed the connection unexpectedly
+        This probably means the server terminated abnormally
+        before or while processing the request.
+The connection to the server was lost. Attempting reset: Succeeded.
+```
+
+Если постмастер заметит что какой то процесс пропал неожиданно (тайминг 52 минуты) ...дописать про kill -9
+
+
+Начиная с версии `10` представление `pg_stat_activity` показывает информацию не только про обслуживающие процессы, но и про служебные фоновые процессы экземпляра:
+```sql
+SELECT pid, backend_type, backend_start, state FROM pg_stat_activity;
+
+ pid |         backend_type         |         backend_start         | state  
+-----+------------------------------+-------------------------------+--------
+  29 | logical replication launcher | 2024-05-07 14:01:48.324964+00 |
+  27 | autovacuum launcher          | 2024-05-07 14:01:48.325743+00 |
+ 355 | client backend               | 2024-05-07 19:42:35.568334+00 | idle
+ 370 | client backend               | 2024-05-07 19:45:05.451273+00 | active
+  25 | background writer            | 2024-05-07 14:01:48.324473+00 |
+  24 | checkpointer                 | 2024-05-07 14:01:48.326223+00 |
+  26 | walwriter                    | 2024-05-07 14:01:48.324803+00 |
+(7 rows)
+```
+
 
 
 
