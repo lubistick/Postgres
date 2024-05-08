@@ -553,3 +553,71 @@ autoanalyze_count   | 0
 - `n_dead_tup` имеет значение `0` - очистка убрала неактуальные версии строк
 - `vacuum_count` имеет значение `1` - очистка обрабатывала таблицу `1` раз
 
+
+## Взаимная блокировка
+
+Добавим в таблицу две строки:
+```sql
+INSERT INTO tt VALUES (1), (2);
+
+INSERT 0 2
+```
+
+Первая транзакция блокирует первую строку таблицы:
+```sql
+BEGIN;
+
+BEGIN
+```
+
+```sql
+UPDATE tt SET n = 10 WHERE n = 1;
+
+UPDATE 1
+```
+
+Вторая транзакция блокирует вторую строку таблицы:
+```sql
+BEGIN;
+
+BEGIN
+```
+
+```sql
+UPDATE tt SET n = 20 WHERE n = 2;
+
+UPDATE 1
+```
+
+Теперь первая транзакция пытается изменить вторую строку и ждет ее освобождения:
+```sql
+UPDATE tt SET n = 20 WHERE n = 2;
+
+```
+
+А вторая транзакция пытается изменить первую строку, и происходит взаимная блокировка:
+```sql
+UPDATE tt SET n = 10 WHERE n = 1;
+
+ERROR:  deadlock detected
+DETAIL:  Process 58 waits for ShareLock on transaction 7692; blocked by process 37.
+Process 37 waits for ShareLock on transaction 7693; blocked by process 58.
+HINT:  See server log for query details.
+CONTEXT:  while updating tuple (0,1) in relation "tt"
+```
+
+Проверим информацию в журнале сообщений:
+```bash
+tail -n 9 /var/lib/postgresql/data/log/postgresql-2024-05-08_213902.log
+
+(pid=58) ERROR:  deadlock detected
+(pid=58) DETAIL:  Process 58 waits for ShareLock on transaction 7692; blocked by process 37.
+        Process 37 waits for ShareLock on transaction 7693; blocked by process 58.
+        Process 58: UPDATE tt SET n = 10 WHERE n = 1;
+        Process 37: UPDATE tt SET n = 20 WHERE n = 2;
+(pid=58) HINT:  See server log for query details.
+(pid=58) CONTEXT:  while updating tuple (0,1) in relation "tt"
+(pid=58) STATEMENT:  UPDATE tt SET n = 10 WHERE n = 1;
+(pid=37) LOG:  duration: 43494.335 ms  statement: UPDATE tt SET n = 20 WHERE n = 2;
+```
+
