@@ -452,7 +452,104 @@ tail -n 1 /var/lib/postgresql/data/log/postgresql-2024-05-07_140148.log
 
 Для полноценного мониторинга требуется внешняя система.
 
+---------------------------------------------------------------
+ПРАКТИКА
 
 
+## Статистика обращений к таблице
 
+Создадим таблицу так, чтобы ее не трогал `autovacuum`:
+```sql
+CREATE TABLE tt(n numeric) WITH (autovacuum_enabled = off);
+
+CREATE TABLE
+```
+
+Вставим `1 000` строк:
+```sql
+INSERT INTO tt SELECT 1 FROM generate_series(1, 1000);
+
+INSERT 0 1000
+```
+
+Удалим все строки из таблицы:
+```sql
+DELETE FROM tt;
+
+DELETE 1000
+```
+
+Проверяем статистику обращений:
+```sql
+SELECT * FROM pg_stat_all_tables WHERE relid = 'tt'::regclass \gx
+
+-[ RECORD 1 ]-------+-------
+relid               | 106775
+schemaname          | public
+relname             | tt
+seq_scan            | 1
+seq_tup_read        | 1000
+idx_scan            |
+idx_tup_fetch       |
+n_tup_ins           | 1000
+n_tup_upd           | 0
+n_tup_del           | 1000
+n_tup_hot_upd       | 0
+n_live_tup          | 0
+n_dead_tup          | 1000
+n_mod_since_analyze | 2000
+n_ins_since_vacuum  | 1000
+last_vacuum         |
+last_autovacuum     |
+last_analyze        |
+last_autoanalyze    |
+vacuum_count        | 0
+autovacuum_count    | 0
+analyze_count       | 0
+autoanalyze_count   | 0
+```
+
+- `n_tup_ins` - мы вставили `1000` строк
+- `n_tup_del` - удалили `1000` строк
+- `n_live_tup` имеет значение `0` - после удаления не осталось активных версий строк
+- `n_dead_tup` имеет значение `1000` - все версии строк не актуальны на текущий момент
+
+Выполним очистку:
+```sql
+VACUUM;
+
+VACUUM
+```
+
+```sql
+SELECT * FROM pg_stat_all_tables WHERE relid = 'tt'::regclass \gx
+
+-[ RECORD 1 ]-------+------------------------------
+relid               | 106775
+schemaname          | public
+relname             | tt
+seq_scan            | 1
+seq_tup_read        | 1000
+idx_scan            |
+idx_tup_fetch       |
+n_tup_ins           | 1000
+n_tup_upd           | 0
+n_tup_del           | 1000
+n_tup_hot_upd       | 0
+n_live_tup          | 0
+n_dead_tup          | 0
+n_mod_since_analyze | 2000
+n_ins_since_vacuum  | 0
+last_vacuum         | 2024-05-08 13:56:32.252112+00
+last_autovacuum     |
+last_analyze        |
+last_autoanalyze    |
+vacuum_count        | 1
+autovacuum_count    | 0
+analyze_count       | 0
+autoanalyze_count   | 0
+```
+
+- `n_dead_tup` имеет значение `0` - очистка убрала неактуальные версии строк
+- `vacuum_count` имеет значение `1` - очистка обрабатывала таблицу `1` раз
 
