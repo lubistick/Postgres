@@ -1,11 +1,10 @@
 # Конфигурирование
 
 Основной файл конфигурации `postgresql.conf` читается один раз при старте сервера.
-
 Если параметр указан несколько раз, применяется последнее значение.
 
 
-## Postgresql.conf
+## Файл postgresql.conf
 
 Располагается в каталоге `PGDATA`:
 ```bash
@@ -50,7 +49,7 @@ head /var/lib/postgresql/data/postgresql.conf
 ```
 
 
-### Pg_file_settings
+### Представление pg_file_settings
 
 В `postgresql.conf` много комментариев. Получим все незакомментированные строки:
 ```sql
@@ -89,7 +88,7 @@ listen_addresses = '*'
 max_connections = 100                   # (change requires restart)
 ```
 
-### Pg_settings
+### Представление pg_settings
 
 Получим действующие значения всех параметров в представлении `pg_settings`. Посмотрим значения параметра `work_mem`:
 ```sql
@@ -179,7 +178,8 @@ sourceline      | 798
 pending_restart | f
 ```
 
-## Postgresql.auto.conf
+
+## Файл postgresql.auto.conf
 
 Есть еще один файл конфигурации `postgresql.auto.conf`:
 ```bash
@@ -257,6 +257,7 @@ ALTER SYSTEM RESET ALL;
 
 ALTER SYSTEM
 ```
+
 
 ## Установка параметров для текущего сеанса
 

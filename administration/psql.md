@@ -294,7 +294,6 @@ VERBOSITY = 'default'
 VERSION = 'PostgreSQL 14.7 on x86_64-pc-linux-musl, compiled by gcc (Alpine 12.2.1_git20220924-r4) 12.2.1 20220924, 64-bit'
 VERSION_NAME = '14.7'
 VERSION_NUM = '140007'
-cur_time = '2024-05-13 23:35:11.848301+00'
 ```
 
 Установим переменную `TEST`:
