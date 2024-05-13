@@ -90,6 +90,33 @@ SELECT schemaname, tablename, tableowner FROM pg_tables LIMIT 3;
 Выводится строка с названиями столбцов - `schemaname`, `tablename`, `tableowner`.
 Выводится количество строк в выборке - `(3 rows)`.
 
+Текущие настройки форматирования:
+```sql
+\pset
+
+border                   1      
+columns                  0      
+csv_fieldsep             ','    
+expanded                 off    
+fieldsep                 '|'    
+fieldsep_zero            off    
+footer                   on     
+format                   aligned
+linestyle                ascii  
+null                     ''     
+numericlocale            off    
+pager                    1
+pager_min_lines          0
+recordsep                '\n'
+recordsep_zero           off
+tableattr
+title
+tuples_only              off
+unicode_border_linestyle single
+unicode_column_linestyle single
+unicode_header_linestyle single
+```
+
 
 ### Выравнивание
 
@@ -196,7 +223,7 @@ rowsecurity | f
 
 ### Разделитель столбцов
 
-Зададим разделитель между значениями столбцов:
+Зададим `пробел` в качестве разделителя между значениями столбцов:
 ```bash
 \pset fieldsep ' '
 
@@ -213,4 +240,95 @@ pg_catalog pg_statistic postgres
 pg_catalog pg_type postgres
 pg_catalog pg_foreign_table postgres
 (3 rows)
+```
+
+
+## Команды операционной системы
+
+В `psql` можно выполнять команды ОС:
+```sql
+\! whoami
+
+root
+```
+
+
+## Переменные psql
+
+Посмотрим все переменные:
+```sql
+\set
+
+AUTOCOMMIT = 'on'                   
+COMP_KEYWORD_CASE = 'preserve-upper'
+DBNAME = 'postgres'                 
+ECHO = 'none'                       
+ECHO_HIDDEN = 'off'                 
+ENCODING = 'UTF8'
+ERROR = 'false'
+FETCH_COUNT = '0'
+HIDE_TABLEAM = 'off'
+HIDE_TOAST_COMPRESSION = 'off'
+HISTCONTROL = 'none'
+HISTSIZE = '500'
+HOST = '/var/run/postgresql'
+IGNOREEOF = '0'
+LAST_ERROR_MESSAGE = 'syntax error at or near "Hi"'
+LAST_ERROR_SQLSTATE = '42601'
+ON_ERROR_ROLLBACK = 'off'
+ON_ERROR_STOP = 'off'
+PORT = '5432'
+PROMPT1 = '%/%R%x%# '
+PROMPT2 = '%/%R%x%# '
+PROMPT3 = '>> '
+QUIET = 'off'
+ROW_COUNT = '1'
+SERVER_VERSION_NAME = '14.7'
+SERVER_VERSION_NUM = '140007'
+SHOW_CONTEXT = 'errors'
+SINGLELINE = 'off'
+SINGLESTEP = 'off'
+SQLSTATE = '00000'
+USER = 'postgres'
+VERBOSITY = 'default'
+VERSION = 'PostgreSQL 14.7 on x86_64-pc-linux-musl, compiled by gcc (Alpine 12.2.1_git20220924-r4) 12.2.1 20220924, 64-bit'
+VERSION_NAME = '14.7'
+VERSION_NUM = '140007'
+cur_time = '2024-05-13 23:35:11.848301+00'
+```
+
+Установим переменную `TEST`:
+```sql
+\set TEST Hi!
+```
+
+Выведем ее:
+```sql
+\echo :TEST
+
+Hi!
+```
+
+Удалим переменную:
+```sql
+\unset TEST
+```
+
+Проверим:
+```sql
+\echo :TEST
+
+:TEST
+```
+
+Запишем результат запроса в переменную:
+```sql
+SELECT now() AS cur_time \gset
+```
+
+Прочитаем:
+```sql
+\echo :cur_time
+
+2024-05-13 23:35:11.848301+00
 ```
