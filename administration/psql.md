@@ -1,62 +1,54 @@
-# Psql
+# Консольная утилита psql
 
-Это терминальный клиент для работы с `Postgres`.
-
-Поставляется вместе с СУБД.
-
-Используется администраторами и разработчиками для интерактивной работы и выполнения скриптов.
+Утилита `psql` - терминальный клиент для работы с СУБД `Postgres`. Это единственный клиент, поставляемый вместе с СУБД.
 
 
-## Основы
+## Запуск
 
-### Запуск
-
+Команда для запуска `psql`:
 ```bash
-psql -d <database> -U <role> -h <host> -p <port>
+psql -d <база_данных> -U <пользователь> -h <хост> -p <порт>
 ```
 
-Пример:
+Запустим:
 ```bash
 psql -U postgres
 
 psql (14.7)
 Type "help" for help.
 ```
+Если параметры не указать, будут использованы значения по умолчанию:
+- `d` - база данных (БД), совпадает с именем пользователя
+- `U` - пользователь, совпадает с именем пользователя операционной системы (OC)
+- `h` - хост, локальное соединение
+- `p` - порт, `5432`
 
-Мы подключились к `psql`, поменялось приглашение. Теперь мы вводим не команды операционной системы, а команды сервера `Postgres`.
+Поменялось приглашение. Мы запустили `psql`.
 
 
-### Подключение к базе данных в psql
+## Подключение к базе данных
 
+Команда для подключения к БД:
 ```bash
-\c[onnect] <database> <role> <host> <port>
+\c <база_данных> <пользователь> <хост> <порт>
 ```
 
-Пример:
+Подключимся к стандартной БД:
 ```bash
-\c demo
+\c postgres
 
-You are now connected to database "demo" as user "postgres".
+You are now connected to database "postgres" as user "postgres".
 ```
 
-О том как поднять демонстрационную базу данных смотрим [здесь](../optimization/demo.md).
-
-
-### Информация о текущем подключении
-
-```bash
-\conninfo
-```
-
-Пример:
+Посмотрим текущее подключение:
 ```bash
 \conninfo
 
-You are connected to database "demo" as user "postgres" via socket in "/var/run/postgresql" at port "5432".
+You are connected to database "postgres" as user "postgres" via socket in "/var/run/postgresql" at port "5432".
 ```
 
 
-### Справка
+## Справка
 
 Список команд `psql`:
 ```bash
@@ -70,22 +62,18 @@ You are connected to database "demo" as user "postgres" via socket in "/var/run/
 
 Список команд SQL:
 ```bash
-\h[elp]
+\h
 ```
 
 Синтаксис команды SQL:
 ```bash
-\h <sqlcommand>
+\h <команда_SQL>
 ```
 
 
 ## Вывод результата запросов
 
-`Psql` умеет выводить результаты запросов в разных форматах.
-
-
-### Выравнивание
-
+Утилита `psql` умеет выводить результаты запросов в разных форматах.
 Сделаем запрос, например:
 ```sql
 SELECT schemaname, tablename, tableowner FROM pg_tables LIMIT 3;
@@ -98,7 +86,12 @@ SELECT schemaname, tablename, tableowner FROM pg_tables LIMIT 3;
 (3 rows)
 ```
 
-По умолчанию вывод с выравниванием.
+По умолчанию ширина столбцов выравнена по самому широкому значению колонок.
+Выводится строка с названиями столбцов - `schemaname`, `tablename`, `tableowner`.
+Выводится количество строк в выборке - `(3 rows)`.
+
+
+### Выравнивание
 
 Переключим в режим без выравнивания:
 ```bash
@@ -125,6 +118,7 @@ pg_catalog|pg_foreign_table|postgres
 Output format is aligned.
 ```
 
+
 ### Шапка и итоговая строка
 
 Переключим в режим без отображения шапки таблицы и итоговой строки:
@@ -144,7 +138,6 @@ pg_catalog | pg_foreign_table | postgres
 ```
 
 Выводятся только кортежи.
-
 Переключим обратно в режим с отображением шапки таблицы и итоговой строки:
 ```bash
 \t
@@ -152,26 +145,6 @@ pg_catalog | pg_foreign_table | postgres
 Tuples only is off.
 ```
 
-### Разделитель столбцов
-
-Зададим разделитель между значениями столбцов:
-```bash
-\pset fieldsep ' '
-
-Field separator is " ".
-```
-
-Это работает только в режиме без выравнивания:
-
-```sql
-SELECT schemaname, tablename, tableowner FROM pg_tables LIMIT 3;
-
-schemaname tablename tableowner
-pg_catalog pg_statistic postgres
-pg_catalog pg_type postgres
-pg_catalog pg_foreign_table postgres
-(3 rows)
-```
 
 ### Расширенный режим
 
@@ -195,15 +168,49 @@ hasindexes  | t
 hasrules    | f
 hastriggers | f
 rowsecurity | f
-
 ```
 Вывод как бы повернулся на бок - в первом столбце названия колонок, во втором их значения.
-
 Расширенный формат удобен, когда нужно вывести малое количество записей, которые в обычном режиме не влазят в экран.
-
 Переключим обратно в обычный режим:
 ```bash
 \x
 
 Expanded display is off.
+```
+
+Расширенный режим можно установить только для одного запроса, если вместо `;` написать `\gx`:
+```sql
+SELECT * FROM pg_tables WHERE tablename = 'pg_proc' \gx
+
+-[ RECORD 1 ]-----------
+schemaname  | pg_catalog
+tablename   | pg_proc
+tableowner  | postgres
+tablespace  |
+hasindexes  | t
+hasrules    | f
+hastriggers | f
+rowsecurity | f
+```
+
+
+### Разделитель столбцов
+
+Зададим разделитель между значениями столбцов:
+```bash
+\pset fieldsep ' '
+
+Field separator is " ".
+```
+
+Это работает только в режиме без выравнивания:
+
+```sql
+SELECT schemaname, tablename, tableowner FROM pg_tables LIMIT 3;
+
+schemaname tablename tableowner
+pg_catalog pg_statistic postgres
+pg_catalog pg_type postgres
+pg_catalog pg_foreign_table postgres
+(3 rows)
 ```

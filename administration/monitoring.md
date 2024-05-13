@@ -621,3 +621,6 @@ tail -n 9 /var/lib/postgresql/data/log/postgresql-2024-05-08_213902.log
 (pid=37) LOG:  duration: 43494.335 ms  statement: UPDATE tt SET n = 20 WHERE n = 2;
 ```
 
+
+## Расширение pg_stat_statements
+
