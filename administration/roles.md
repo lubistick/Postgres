@@ -206,3 +206,80 @@ SELECT session_user, current_user;
  alice        | alice
 (1 row)
 ```
+
+
+## Владение объектами
+
+Когда пользователь `alice` создает какой-либо объект в БД, он становится его владельцем:
+```sql
+CREATE TABLE test(id integer);
+
+CREATE TABLE
+```
+
+Как в этом убедиться? Владелец указан в столбце `owner`:
+```sql
+\dt test
+
+       List of relations
+ Schema | Name | Type  | Owner
+--------+------+-------+-------
+ public | test | table | alice
+(1 row)
+```
+
+
+## Удаление ролей
+
+Удалить роль можно, если нет объектов, которыми она владеет.
+
+```sql
+\c - postgres
+
+You are now connected to database "postgres" as user "postgres".
+```
+
+```sql
+DROP ROLE alice;
+
+ERROR:  role "alice" cannot be dropped because some objects depend on it
+DETAIL:  owner of table test
+```
+
+Можно передать объекты другому пользователю:
+```sql
+REASSIGN OWNED BY alice TO bob;
+
+REASSIGN OWNED
+```
+
+```sql
+\dt test
+
+       List of relations
+ Schema | Name | Type  | Owner
+--------+------+-------+-------
+ public | test | table | bob
+(1 row)
+```
+
+```sql
+DROP ROLE alice;
+
+DROP ROLE
+```
+
+Другой вариант - удалить все объекты:
+```sql
+DROP OWNED BY bob;
+
+DROP OWNED
+```
+
+```sql
+DROP ROLE bob;
+
+DROP ROLE
+```
+
+Надо только иметь в виду, что роль может владеть объектами в разных БД.
