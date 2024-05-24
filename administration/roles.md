@@ -1,77 +1,86 @@
 # Роли и атрибуты
 
+Роль - пользователь СУБД.
+Роли являются общими объектами кластера, одна роль может подключаться к разным БД и быть владельцем объектов в разных БД.
 
-## Создание ролей
+Посмотрим все имеющиеся роли через системный каталог:
+```sql
+SELECT usename FROM pg_user;
 
-Создадим роль:
+ usename  
+----------
+ postgres
+(1 row)
+```
+
+Или с помощью команды `\du`:
+```sql
+\du
+                                   List of roles
+ Role name |                         Attributes                         | Member of
+-----------+------------------------------------------------------------+-----------
+ postgres  | Superuser, Create role, Create DB, Replication, Bypass RLS | {}
+```
+
+Роль `postgres` - суперпользователь, созданный при инициализации кластера.
+У пользователя есть атрибуты, дающие право:
+- `LOGIN` - подключаться
+- `SUPERUSER` - права суперпользователя
+- `CREATEDB` - создавать БД
+- `CREATEROLE` - создавать других пользователей
+- `REPLICATION` - использовать протокол репликации
+- др.
+
+
+## Создание роли
+
+Создадим пользователя `alice` с возможностью подключаться и создавать другие роли:
 ```sql
 CREATE ROLE alice LOGIN CREATEROLE;
 
 CREATE ROLE
 ```
 
-Мы создали роль `alice`, которая имеет возможность:
-- `LOGIN` - подключаться
-- `CREATEROLE` - создавать друге роли
-
-Подключимся как пользователь `alice`:
+Подключимся под пользователем `alice`:
 ```sql
 \c - alice
 
 You are now connected to database "postgres" as user "alice".
 ```
 
-Пользовать `alice` может создать нового пользователя `bob`:
+Пользовать `alice` может создать новую роль, например `bob` с возможностью подключаться:
 ```sql
 CREATE ROLE bob LOGIN;
 
 CREATE ROLE
 ```
 
-Подключимся как пользователь `bob`:
+Подключимся под пользователем `bob`:
 ```sql
 \c - bob
 
 You are now connected to database "postgres" as user "bob".
 ```
 
-Пользователь `bob` не может создать нового пользователя:
+Пользователь `bob` не может создать новую роль, т.к. у него нет соответствующих прав:
 ```sql
 CREATE ROLE charlie LOGIN;
 
 ERROR:  permission denied to create role
 ```
 
-Посмотрим роли, имеющиеся в кластере командой `\du`:
-```sql
-\du
 
-                                   List of roles
- Role name |                         Attributes                         | Member of
------------+------------------------------------------------------------+-----------
- alice     | Create role                                                | {}
- bob       |                                                            | {}
- postgres  | Superuser, Create role, Create DB, Replication, Bypass RLS | {}
-```
+## Изменение атрибутов роли
 
-Или в системном каталоге:
-```sql
-SELECT usename FROM pg_user;
- usename  
-----------
- postgres
- alice
- bob
-(3 rows)
-```
-
-Существующие роли можно изменять. Пользователь `alice` может отобрать у пользователя `bob` право на вход:
+Подключимся под пользователем `alice`:
 ```sql
 \c - alice
 
 You are now connected to database "postgres" as user "alice".
 ```
 
+Пользователь `alice` может отобрать у роли `bob` право на вход.
+Чтобы это сделать надо добавить приставку `NO` к имени атрибута:
 ```sql
 ALTER ROLE bob NOLOGIN;
 
@@ -93,14 +102,12 @@ ALTER ROLE alice NOCREATEROLE;
 ALTER ROLE
 ```
 
-Проверим:
+Теперь пользователь `alice` не может создавать другие роли:
 ```sql
 CREATE ROLE charlie LOGIN;
 
 ERROR:  permission denied to create role
 ```
-
-Такие пары как `LOGIN` - `NOLOGIN` или `CREATEROLE` - `NOCREATEROLE` есть и у других атрибутов.
 
 Теперь пользователь `alice` не может изменять атрибуты существующих ролей:
 ```sql
