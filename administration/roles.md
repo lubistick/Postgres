@@ -203,8 +203,15 @@ SELECT session_user, current_user;
 
 ## Установка конфигурационных параметров для роли
 
+Подключимся под пользователем `postgres`:
+```sql
+\c - postgres
+
+You are now connected to database "postgres" as user "postgres".
+```
+
 Чтобы пользователь `alice` не злоупотреблял полномочиями, сделаем так, чтобы все его команды попадали в журнал сообщений.
-Это еще один вариант установки конфигурационных параметров - он сработает при подключении пользователя `alice` к серверу.
+Это еще один вариант установки конфигурационных параметров - он сработает при подключении пользователя `alice` к серверу:
 ```sql
 ALTER ROLE alice SET log_min_duration_statement = 0;
 
@@ -227,14 +234,24 @@ ALTER ROLE
 
 ## Владение объектами
 
-Когда пользователь `alice` создает какой-либо объект в БД, он становится его владельцем:
+Владелец объекта - роль, создавшая объект.
+Роль может владеть объектами в разных БД.
+
+Подключимся под пользователем `alice`:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+Создадим таблицу `test`: 
 ```sql
 CREATE TABLE test(id integer);
 
 CREATE TABLE
 ```
 
-Как в этом убедиться? Владелец указан в столбце `owner`:
+Владелец указан в столбце `owner`:
 ```sql
 \dt test
 
@@ -248,14 +265,14 @@ CREATE TABLE
 
 ## Удаление ролей
 
-Удалить роль можно, если нет объектов, которыми она владеет.
-
+Подключимся под пользователем `postgres`:
 ```sql
 \c - postgres
 
 You are now connected to database "postgres" as user "postgres".
 ```
 
+Удалить роль можно, если нет объектов, которыми она владеет:
 ```sql
 DROP ROLE alice;
 
@@ -263,13 +280,14 @@ ERROR:  role "alice" cannot be dropped because some objects depend on it
 DETAIL:  owner of table test
 ```
 
-Можно передать объекты другому пользователю:
+Передадим объекты другому пользователю:
 ```sql
 REASSIGN OWNED BY alice TO bob;
 
 REASSIGN OWNED
 ```
 
+Теперь владелец - роль `bob`:
 ```sql
 \dt test
 
@@ -280,6 +298,7 @@ REASSIGN OWNED
 (1 row)
 ```
 
+Удалим роль `alice`:
 ```sql
 DROP ROLE alice;
 
@@ -293,10 +312,9 @@ DROP OWNED BY bob;
 DROP OWNED
 ```
 
+И удалить роль:
 ```sql
 DROP ROLE bob;
 
 DROP ROLE
 ```
-
-Надо только иметь в виду, что роль может владеть объектами в разных БД.
