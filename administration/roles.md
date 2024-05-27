@@ -27,9 +27,11 @@ SELECT usename FROM pg_user;
 - `LOGIN` - подключаться
 - `SUPERUSER` - права суперпользователя
 - `CREATEDB` - создавать БД
-- `CREATEROLE` - создавать других пользователей
+- `CREATEROLE` - создавать/изменять других пользователей
 - `REPLICATION` - использовать протокол репликации
 - др.
+
+Атрибут `LOGIN` не отображается в выводе команды `\du`, а его отсутствие отображается (было бы написано `Cannot login`).
 
 
 ## Создание роли
@@ -109,7 +111,7 @@ CREATE ROLE charlie LOGIN;
 ERROR:  permission denied to create role
 ```
 
-Теперь пользователь `alice` не может изменять атрибуты существующих ролей:
+И изменять их атрибуты:
 ```sql
 ALTER ROLE bob LOGIN;
 
@@ -119,20 +121,26 @@ ERROR:  permission denied
 
 ## Групповые роли
 
-Чтобы наделить пользователя `alice` супервозможностями, включим ее в супервользовательскую роль `postgres`:
+Роль может также выступать в качестве группы пользователей.
+Включим пользователя `alice` в группу `postgres`.
+Другими словами, разрешим роли `alice` действовать от имени супервользовательской роли `postgres`.
+Это напоминает команду `su` в ОС `Unix`.
 
+Подключимся как пользователь `postgres`:
 ```sql
 \c - postgres
 
 You are now connected to database "postgres" as user "postgres".
 ```
 
+Включим пользователя `alice` в группу `postgres` с помощью команды `GRANT`:
 ```sql
 GRANT postgres TO alice;
 
 GRANT ROLE
 ```
 
+Посмотрим имеющиеся роли:
 ```sql
 \du
 
@@ -144,36 +152,16 @@ GRANT ROLE
  postgres  | Superuser, Create role, Create DB, Replication, Bypass RLS | {}
 ```
 
-Чтобы пользователь `alice` не злоупотреблял полномочиями, сделаем так, чтобы все его команды попадали в журнал сообщений:
-```sql
-ALTER ROLE alice SET log_min_duration_statement = 0;
-
-ALTER ROLE
-```
-
-Это еще один вариант установки конфигурационных параметров - он сработает при подключении пользователя `alice` к серверу.
-
-Можно ограничить действия и конкретной БД:
-```sql
-ALTER ROLE alice RESET log_min_duration_statement;
-
-ALTER ROLE
-```
-
-```sql
-ALTER ROLE alice IN DATABASE postgres SET log_min_duration_statement = 0;
-
-ALTER ROLE
-```
-
-Роль `alice` не получает возможности групповой роли автоматически.
-Она может ими воспользоваться, только если переключится на эту роль:
+Теперь пользователь `alice` член группы `postgres` (колонка `Member of`).
+Подключимся под пользователем `alice`:
 ```sql
 \c - alice
 
 You are now connected to database "postgres" as user "alice".
 ```
 
+Роль `alice` не получает возможности групповой роли автоматически.
+Она может ими воспользоваться, только если переключится на эту роль командой `SET ROLE`:
 ```sql
 SET ROLE postgres;
 
@@ -186,9 +174,7 @@ ALTER ROLE bob LOGIN;
 ALTER ROLE
 ```
 
-Это напоминает команду `su` в ОС `Unix`.
-
-Чтобы понять, кем является пользователь на самом деле и на какую роль он переключился, есть функция:
+Чтобы понять, кем является пользователь на самом деле и на какую роль он переключился, есть функции:
 ```sql
 SELECT session_user, current_user;
 
@@ -212,6 +198,30 @@ SELECT session_user, current_user;
 --------------+--------------
  alice        | alice
 (1 row)
+```
+
+
+## Установка конфигурационных параметров для роли
+
+Чтобы пользователь `alice` не злоупотреблял полномочиями, сделаем так, чтобы все его команды попадали в журнал сообщений.
+Это еще один вариант установки конфигурационных параметров - он сработает при подключении пользователя `alice` к серверу.
+```sql
+ALTER ROLE alice SET log_min_duration_statement = 0;
+
+ALTER ROLE
+```
+
+Можно ограничить действия роли в конкретной БД:
+```sql
+ALTER ROLE alice RESET log_min_duration_statement;
+
+ALTER ROLE
+```
+
+```sql
+ALTER ROLE alice IN DATABASE postgres SET log_min_duration_statement = 0;
+
+ALTER ROLE
 ```
 
 
