@@ -155,3 +155,127 @@ GRANT CREATE, USAGE ON SCHEMA alice TO bob;
 GRANT
 ```
 
+Роль `bob` снова пытается прочитать таблицу:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+SELECT * FROM alice.t1;
+
+ERROR:  permission denied for table t1
+```
+
+В чем причина ошибки на этот раз?
+Сейчас у пользователя `bob` есть доступ к схеме, но нет доступа к самой таблице:
+```sql
+\dp alice.t1
+
+                            Access privileges
+ Schema | Name | Type  | Access privileges | Column privileges | Policies
+--------+------+-------+-------------------+-------------------+----------
+ alice  | t1   | table |                   |                   |
+(1 row)
+```
+Пустое поле `Access privileges` означает, что у владельца есть полный набор привилегий, а кроме него никто не имеет доступа.
+
+Подключимся как пользователь `alice`:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+Выдадим роли `bob` право на чтение:
+```sql
+GRANT SELECT ON t1 TO bob;
+
+GRANT
+```
+
+Посмотрим, как изменились привилегии:
+```sql
+\dp t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=r/alice         |                   |
+(1 row)
+```
+
+Привилегии для таблиц:
+- `a` - `INSERT`
+- `r` - `SELECT`
+- `w` - `UPDATE`
+- `d` - `DELETE`
+- `D` - `TRUNCATE`
+- `x` - `REGERENCE`
+- `t` - `TRIGGER`
+
+Подключимся как пользователь `bob`:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+На этот раз у роли `bob` все получается:
+```sql
+SELECT * FROM alice.t1;
+
+ n 
+---
+(0 rows)
+```
+
+А, например, вставить строку в таблицу он не сможет:
+```sql
+INSERT INTO alice.t1 VALUES (42);
+
+ERROR:  permission denied for table t1
+```
+
+Некоторые привилегии можно выдать на определенные столбцы:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+GRANT INSERT(n, m) ON t2 TO bob;
+
+GRANT
+```
+
+```sql
+GRANT SELECT(m) ON t2 TO bob;
+
+GRANT
+```
+
+```sql
+\dp t2
+
+                            Access privileges
+ Schema | Name | Type  | Access privileges | Column privileges | Policies
+--------+------+-------+-------------------+-------------------+----------
+ alice  | t2   | table |                   | n:               +|
+        |      |       |                   |   bob=a/alice    +|
+        |      |       |                   | m:               +|
+        |      |       |                   |   bob=ar/alice    |
+(1 row)
+```
+
+Подключимся под пользователем `bob`:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+Теперь пользователь `bob` может добавлять строки в таблицу `t2`:
