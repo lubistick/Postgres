@@ -13,3 +13,4 @@
 9. [Низкий уровень](lowlevel.md)
 10. [Мониторинг](monitoring.md)
 11. [Роли и атрибуты](roles.md)
+12. [Привилегии](privilege.md)
