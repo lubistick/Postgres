@@ -346,3 +346,91 @@ ERROR:  must be owner of table t1
 ```
 
 Удалить таблицу может только владелец или суперпользователь, специальной привилегии для этого не существует.
+
+## Групповые привилегии
+
+Пусть роль `alice` выдаст роли `public` (описать паблик!) привилегию изменения t2:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+Роль `public` - групповая роль, в которую включены абсолютно все.
+
+```sql
+GRANT UPDATE ON t2 TO public;
+
+GRANT
+```
+
+```sql
+\dp t2
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t2   | table | alice=arwdDxt/alice+| n:               +|
+        |      |       | =w/alice            |   bob=a/alice    +|
+        |      |       |                     | m:               +|
+        |      |       |                     |   bob=ar/alice    |
+(1 row)
+```
+
+Пустая роль слева от знака равенства обозначает `public`.
+
+Проверим, сможет ли роль `bob` воспользоваться этой привилегией:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+UPDATE alice.t2 SET n = n + 1;
+
+ERROR:  permission denied for table t2
+```
+
+В чем причина ошибки?
+Дело в том, что перед обновлением t2 сначала необходимо выбрать нужные строки, а для этого требуется привилегия чтения
+(как минимум столбца `n`, который используется в условии).
+Но пользователь `bob` имеет право читать только столбец `m`.
+
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+GRANT SELECT ON t2 TO bob;
+
+GRANT
+```
+
+```sql
+\dp t2
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t2   | table | alice=arwdDxt/alice+| n:               +|
+        |      |       | =w/alice           +|   bob=a/alice    +|
+        |      |       | bob=r/alice         | m:               +|
+        |      |       |                     |   bob=ar/alice    |
+(1 row)
+```
+
+Вот теперь у пользователя `bob` появилась возможность обновления таблицы:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+UPDATE alice.t2 SET n = n + 1;
+
+UPDATE 1
+```
