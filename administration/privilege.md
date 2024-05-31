@@ -279,3 +279,70 @@ You are now connected to database "postgres" as user "bob".
 ```
 
 Теперь пользователь `bob` может добавлять строки в таблицу `t2`:
+```sql
+INSERT INTO alice.t2 VALUES(1, 2);
+
+INSERT 0 1
+```
+
+А читать сможет только один столбец:
+```sql
+SELECT * FROM alice.t2;
+
+ERROR:  permission denied for table t2
+```
+
+```sql
+SELECT m FROM alice.t2;
+
+ m 
+---
+ 2
+(1 row)
+```
+
+Если необходимо, роль `alice` может выдать пользователю `bob` все привилегии, не перечисляя их явно:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+GRANT ALL ON t1 TO bob;
+
+GRANT
+```
+
+```sql
+\dp t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=arwdDxt/alice   |                   |
+(1 row)
+```
+
+Теперь роли `bob` доступны все действия, например, удаление строк:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+DELETE FROM alice.t1;
+
+DELETE 0
+```
+
+А удаление самой таблицы?
+```sql
+DROP TABLE alice.t1;
+
+ERROR:  must be owner of table t1
+```
+
+Удалить таблицу может только владелец или суперпользователь, специальной привилегии для этого не существует.
