@@ -434,3 +434,206 @@ UPDATE alice.t2 SET n = n + 1;
 
 UPDATE 1
 ```
+
+## Передача права
+
+Создадим третью роль.
+Роль `bob` пробует передать ей права на таблицу `t1`, принадлежащую роли `alice`:
+```sql
+\c - postgres
+
+You are now connected to database "postgres" as user "postgres".
+```
+
+```sql
+CREATE ROLE charlie LOGIN;
+
+CREATE ROLE
+```
+
+У пользователя `bob` есть полный доступ к `t1`:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+\dp alice.t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=arwdDxt/alice   |                   |
+(1 row)
+```
+
+Но он не может передать свои привилегии пользователю `charlie`:
+```sql
+GRANT SELECT ON alice.t1 TO charlie;
+
+WARNING:  no privileges were granted for "t1"
+GRANT
+```
+
+Чтобы это было возможно, роль `alice` должна разрешить пользователю `bob` передавать права:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+GRANT SELECT, UPDATE ON t1 TO bob WITH GRANT OPTION;
+
+GRANT
+```
+
+```sql
+\dp t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=ar*w*dDxt/alice |                   |
+(1 row)
+```
+
+Звездочки справа от символа привилегии показывают право передачи.
+
+Теперь пользователь `bob` может поделиться с пользователем `charlie` привилегиями, в том числе и правом передачи:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+GRANT SELECT ON alice.t1 TO charlie WITH GRANT OPTION;
+
+GRANT
+```
+
+```sql
+GRANT UPDATE ON alice.t1 TO charlie;
+
+GRANT
+```
+
+```sql
+\dp alice.t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=ar*w*dDxt/alice+|                   |
+        |      |       | charlie=r*w/bob     |                   |
+(1 row)
+```
+
+Роль может получить одну и ту же привилегию от разных ролей.
+Обратите внимание, если привилегия выдается суперпользователем, она выдается от имени владельца:
+```sql
+\c - postgres
+
+You are now connected to database "postgres" as user "postgres".
+```
+
+```sql
+GRANT UPDATE ON alice.t1 TO charlie;
+
+GRANT
+```
+
+```sql
+\dp alice.t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=ar*w*dDxt/alice+|                   |
+        |      |       | charlie=r*w/bob    +|                   |
+        |      |       | charlie=w/alice     |                   |
+(1 row)
+```
+
+Роль может отозвать привилегии только у той роли, которой она их непосредственно выдала.
+Например, роль `alice` не сможет отозвать право передачи у пользователя `charlie`, потому что она его не выдавала.
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+REVOKE GRANT OPTION FOR SELECT ON alice.t1 FROM charlie;
+
+REVOKE
+```
+
+Никакой ошибки не фиксируется, но и права не изменяются:
+```sql
+\dp t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=ar*w*dDxt/alice+|                   |
+        |      |       | charlie=r*w/bob    +|                   |
+        |      |       | charlie=w/alice     |                   |
+(1 row)
+```
+
+В то же время роль `alice` не может просто так отозвать привилегии у пользователя `bob`, если он успел передать их кому-либо еще:
+```sql
+REVOKE GRANT OPTION FOR SELECT ON alice.t1 FROM bob;
+
+ERROR:  dependent privileges exist
+HINT:  Use CASCADE to revoke them too.
+```
+
+В таком случае привилегии надо отзывать по всей иерархии передачи с помощью `CASCADE`:
+```sql
+REVOKE GRANT OPTION FOR SELECT ON alice.t1 FROM bob CASCADE;
+
+REVOKE
+```
+
+```sql
+\dp t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=arw*dDxt/alice +|                   |
+        |      |       | charlie=w/bob      +|                   |
+        |      |       | charlie=w/alice     |                   |
+(1 row)
+```
+
+Как видим, у пользователя `bob` пропало право передачи привилегии, а у пользователя `charlie` была отозвана и сама привилегия.
+
+Аналогично можно отозвать по иерархии и привилегию:
+```sql
+REVOKE UPDATE ON alice.t1 FROM bob CASCADE;
+
+REVOKE
+```
+
+```sql
+\dp t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=ardDxt/alice   +|                   |
+        |      |       | charlie=w/alice     |                   |
+(1 row)
+```
