@@ -785,3 +785,99 @@ SELECT alice.f_new();
      1
 (1 row)
 ```
+
+## Привилегии по умолчанию
+
+Однако можно автоматически отзывать привилегию `EXECUTE` с помощью механизма привилегий по умолчанию:
+
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE alice
+REVOKE EXECUTE ON FUNCTIONS FROM public;
+
+ALTER DEFAULT PRIVILEGES
+```
+
+```sql
+\ddp
+
+           Default access privileges
+ Owner | Schema |   Type   | Access privileges
+-------+--------+----------+-------------------
+ alice |        | function | alice=X/alice
+(1 row)
+```
+
+```sql
+DROP FUNCTION f_new();
+
+DROP FUNCTION
+```
+
+```sql
+CREATE FUNCTION f_new() RETURNS integer AS $$ SELECT 1; $$ LANGUAGE SQL;
+
+CREATE FUNCTION
+```
+
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+SELECT alice.f_new();
+
+ERROR:  permission denied for function f_new
+```
+
+Аналогично можно настроить дополнительные правила для выдачи привилегий.
+Пусть роль `alice` хочет, чтобы пользователь `bob` автоматически получал право чтения любой таблицы, которую она создает:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE alice
+GRANT SELECT ON TABLES TO bob;
+
+ALTER DEFAULT PRIVILEGES
+```
+
+```sql
+\ddp
+
+            Default access privileges
+ Owner | Schema |   Type   |  Access privileges
+-------+--------+----------+---------------------
+ alice |        | function | alice=X/alice
+ alice |        | table    | alice=arwdDxt/alice+
+       |        |          | bob=r/alice
+(2 rows)
+```
+
+```sql
+CREATE TABLE t3(n integer);
+
+CREATE TABLE
+```
+
+```sql
+\dp t3
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t3   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=r/alice         |                   |
+(1 row)
+```
+
