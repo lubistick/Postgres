@@ -637,3 +637,151 @@ REVOKE
         |      |       | charlie=w/alice     |                   |
 (1 row)
 ```
+
+## Функции
+
+Роль `alice` создает простую функцию, возвращающую число строк в таблице `t2`:
+```sql
+CREATE FUNCTION f() RETURNS integer AS $$
+  SELECT count(*)::integer FROM t2;
+$$ LANGUAGE SQL;
+
+CREATE FUNCTION
+```
+
+```sql
+SELECT f();
+
+ f 
+---
+ 1
+(1 row)
+```
+
+Роль `public` автоматически получает эту привилегию для любой создаваемой функции.
+Поэтому, например, пользователь `bob` может выполнить функцию, которую только что создала роль `alice`.
+
+Отчасти это компенсируется тем, что по умолчанию (или при явном указании `SECURITY INVOKER`)
+функция выполняется с правами и в окружении вызывающей роли, включая путь поиска:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+SELECT alice.f();
+
+ERROR:  relation "t2" does not exist
+LINE 1:  SELECT count(*)::integer FROM t2;
+                                       ^
+QUERY:   SELECT count(*)::integer FROM t2;
+CONTEXT:  SQL function "f" during inlining
+```
+
+Поэтому пользователь `bob` не сможет получить доступ к объектам, на которые ему не выданы привилегии.
+
+Если же пользователь `bob` создаст свою таблицу `t2`, функция будет работать с этой таблицей для роли `bob`:
+```sql
+CREATE TABLE t2(n numeric);
+
+CREATE TABLE
+```
+
+```sql
+SELECT alice.f();
+
+ f 
+---
+ 0
+(1 row)
+```
+
+Одна и та же функция выдает разный результат, потому что внутри идет обращение к разным объектам.
+
+Другой доступный вариант - объявить функцию, как работающую с правами создавшего (`SECURITY DEFINER`):
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+CREATE OR REPLACE FUNCTION f() RETURNS integer AS $$
+  SELECT count(*)::integer FROM t2;
+$$ SECURITY DEFINER LANGUAGE SQL;
+
+CREATE FUNCTION
+```
+
+В этом случае функция работает в контексте создавшей роли, независимо от того, кто ее вызывает:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+SELECT alice.f();
+
+ f 
+---
+ 1
+(1 row)
+```
+
+В таком случае, конечно, надо внимательно следить за выданными привилегиями.
+Скорее всего, потребуется отозвать привилегию `EXECUTE` у роли `public` и выдать ее явно только нужным ролям:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA alice FROM public;
+
+REVOKE
+```
+
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+SELECT alice.f();
+
+ERROR:  permission denied for function f
+```
+
+Дело осложняется тем, что привилегия на выполнение автоматически выдается роли `public` на каждую вновь создаваемую функцию,
+и это поведение нельзя изменить:
+
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+```sql
+CREATE FUNCTION f_new() RETURNS integer AS $$ SELECT 1; $$ LANGUAGE SQL;
+
+CREATE FUNCTION
+```
+
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+```sql
+SELECT alice.f_new();
+
+ f_new 
+-------
+     1
+(1 row)
+```
