@@ -262,27 +262,81 @@ ERROR:  permission denied for table t1
 ```
 
 
-### Колонки таблицы
+### Все привилегии таблицы
 
-Некоторые привилегии можно выдать на определенные колонки:
+Подключимся под ролью `alice`:
 ```sql
 \c - alice
 
 You are now connected to database "postgres" as user "alice".
 ```
 
+Роль `alice` может выдать пользователю `bob` все привилегии, не перечисляя их явно:
+```sql
+GRANT ALL ON t1 TO bob;
+
+GRANT
+```
+
+Посмотрим привилегии для таблицы `t1`:
+```sql
+\dp t1
+
+                             Access privileges
+ Schema | Name | Type  |  Access privileges  | Column privileges | Policies
+--------+------+-------+---------------------+-------------------+----------
+ alice  | t1   | table | alice=arwdDxt/alice+|                   |
+        |      |       | bob=arwdDxt/alice   |                   |
+(1 row)
+```
+
+Подключимся под пользователем `bob`:
+```sql
+\c - bob
+
+You are now connected to database "postgres" as user "bob".
+```
+
+Роли `bob` доступны все действия, например, удаление строк:
+```sql
+DELETE FROM alice.t1;
+
+DELETE 0
+```
+
+Удалить таблицу может только владелец или суперпользователь, привилегии для этого не существует:
+```sql
+DROP TABLE alice.t1;
+
+ERROR:  must be owner of table t1
+```
+
+
+### Колонки таблицы
+
+Некоторые привилегии можно выдать на определенные колонки.
+Подключимся под ролью `alice`:
+```sql
+\c - alice
+
+You are now connected to database "postgres" as user "alice".
+```
+
+Дадим пользователю `bob` право на вставку в колонки `n` и `m` в таблице `t2`:
 ```sql
 GRANT INSERT(n, m) ON t2 TO bob;
 
 GRANT
 ```
 
+И право читать только колонку `m`:
 ```sql
 GRANT SELECT(m) ON t2 TO bob;
 
 GRANT
 ```
 
+Посмотрим привилегии таблицы `t2` - в столбце `Column privileges` появились соответствующие права доступа:
 ```sql
 \dp t2
 
@@ -310,7 +364,7 @@ INSERT INTO alice.t2 VALUES(1, 2);
 INSERT 0 1
 ```
 
-А читать сможет только один столбец:
+А читать может только столбец `m`:
 ```sql
 SELECT * FROM alice.t2;
 
@@ -326,51 +380,6 @@ SELECT m FROM alice.t2;
 (1 row)
 ```
 
-Если необходимо, роль `alice` может выдать пользователю `bob` все привилегии, не перечисляя их явно:
-```sql
-\c - alice
-
-You are now connected to database "postgres" as user "alice".
-```
-
-```sql
-GRANT ALL ON t1 TO bob;
-
-GRANT
-```
-
-```sql
-\dp t1
-
-                             Access privileges
- Schema | Name | Type  |  Access privileges  | Column privileges | Policies
---------+------+-------+---------------------+-------------------+----------
- alice  | t1   | table | alice=arwdDxt/alice+|                   |
-        |      |       | bob=arwdDxt/alice   |                   |
-(1 row)
-```
-
-Теперь роли `bob` доступны все действия, например, удаление строк:
-```sql
-\c - bob
-
-You are now connected to database "postgres" as user "bob".
-```
-
-```sql
-DELETE FROM alice.t1;
-
-DELETE 0
-```
-
-А удаление самой таблицы?
-```sql
-DROP TABLE alice.t1;
-
-ERROR:  must be owner of table t1
-```
-
-Удалить таблицу может только владелец или суперпользователь, специальной привилегии для этого не существует.
 
 ## Групповые привилегии
 
