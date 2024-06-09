@@ -176,21 +176,23 @@ GRANT
 
 ## Таблицы
 
-Роль `bob` снова пытается прочитать таблицу:
+Подключимся под пользователем `bob`:
 ```sql
 \c - bob
 
 You are now connected to database "postgres" as user "bob".
 ```
 
+Снова прочитаем таблицу `t1` в схеме `alice`:
 ```sql
 SELECT * FROM alice.t1;
 
 ERROR:  permission denied for table t1
 ```
 
-В чем причина ошибки на этот раз?
-Сейчас у пользователя `bob` есть доступ к схеме, но нет доступа к самой таблице:
+Опять ошибка!
+Сейчас у пользователя `bob` есть доступ к схеме, но нет доступа к самой таблице.
+Посмотрим привилегии у таблицы:
 ```sql
 \dp alice.t1
 
@@ -209,7 +211,7 @@ ERROR:  permission denied for table t1
 You are now connected to database "postgres" as user "alice".
 ```
 
-Выдадим роли `bob` право на чтение:
+Дадим пользователю `bob` право на чтение:
 ```sql
 GRANT SELECT ON t1 TO bob;
 
@@ -227,7 +229,6 @@ GRANT
         |      |       | bob=r/alice         |                   |
 (1 row)
 ```
-
 Привилегии для таблиц:
 - `a` - `INSERT`
 - `r` - `SELECT`
@@ -237,14 +238,14 @@ GRANT
 - `x` - `REGERENCE`
 - `t` - `TRIGGER`
 
-Подключимся как пользователь `bob`:
+Подключимся под пользователем `bob`:
 ```sql
 \c - bob
 
 You are now connected to database "postgres" as user "bob".
 ```
 
-На этот раз у роли `bob` все получается:
+Теперь пользователь `bob` может читать таблицу `t1` в схеме `alice`:
 ```sql
 SELECT * FROM alice.t1;
 
@@ -253,14 +254,17 @@ SELECT * FROM alice.t1;
 (0 rows)
 ```
 
-А, например, вставить строку в таблицу он не сможет:
+Но вставить строку в таблицу пользователь `bob` не сможет:
 ```sql
 INSERT INTO alice.t1 VALUES (42);
 
 ERROR:  permission denied for table t1
 ```
 
-Некоторые привилегии можно выдать на определенные столбцы:
+
+### Колонки таблицы
+
+Некоторые привилегии можно выдать на определенные колонки:
 ```sql
 \c - alice
 
