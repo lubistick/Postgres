@@ -76,15 +76,16 @@ CREATE TABLE
 ```
 
 
-## Привилегии
+## Схемы
 
-Роль `bob` пробует обратиться к таблице `t1`:
+Подключимся под пользователем `bob`:
 ```sql
 \c - bob
 
 You are now connected to database "postgres" as user "bob".
 ```
 
+Прочитаем таблицу `t1` в схеме `alice`:
 ```sql
 SELECT * FROM alice.t1;
 
@@ -93,9 +94,12 @@ LINE 1: SELECT * FROM alice.t1;
                       ^
 ```
 
-В чем причина ошибки?
+Ошибка! У пользователя `bob` нет доступа к схеме `alice`, т.к. он:
+- не суперпользователь
+- не владелец схемы
+- не имеет нужных привилегий
 
-У пользователя `bob` нет доступа к схеме, т.к. он не суперпользователь, не владелец схемы, и не имеет нужных привилегий:
+Посмотрим описание схемы `alice`:
 ```sql
 \dn+ alice
 
@@ -114,14 +118,14 @@ LINE 1: SELECT * FROM alice.t1;
 - `U` - `usage`
 - `C` - `create`
 
-Подключимся под пользователем `alice`:
+Подключимся под ролью `alice`:
 ```sql
 \c - alice
 
 You are now connected to database "postgres" as user "alice".
 ```
 
-Попробуем выдать привилегии пользователю `bob`:
+Выдадим привилегии пользователю `bob`:
 ```sql
 GRANT CREATE, USAGE ON SCHEMA alice TO bob;
 
@@ -129,23 +133,22 @@ WARNING:  no privileges were granted for "alice"
 GRANT
 ```
 
-Почему привилегии не выдались?
-Пользователь `alice` - не владелец схемы `alice`, поэтому выдавать привилегии не может.
-
-Подключимся под пользователем `postgres`:
+Ошибка! Роль `alice` - не владелец схемы `alice`, поэтому выдавать привилегии не может.
+Подключимся под суперпользователем `postgres`:
 ```sql
 \c - postgres
 
 You are now connected to database "postgres" as user "postgres".
 ```
 
-Сделаем пользователя `alice` владельцем схемы `alice`:
+Сделаем роль `alice` владельцем схемы `alice`:
 ```sql
 ALTER SCHEMA alice OWNER TO alice;
 
 ALTER SCHEMA
 ```
 
+Посмотрим описание схемы `alice`. Значение в колонке `Owner` изменилось:
 ```sql
 \dn+ alice
 
@@ -163,12 +166,15 @@ ALTER SCHEMA
 You are now connected to database "postgres" as user "alice".
 ```
 
-Теперь роль `alice` может выдать доступ роли `bob`:
+Теперь роль `alice` может выдать доступ пользователю `bob`:
 ```sql
 GRANT CREATE, USAGE ON SCHEMA alice TO bob;
 
 GRANT
 ```
+
+
+## Таблицы
 
 Роль `bob` снова пытается прочитать таблицу:
 ```sql
