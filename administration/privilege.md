@@ -176,6 +176,114 @@ REVOKE
 
 ## Схемы
 
+Для схем существуют следующие привилегии:
+- `C` - `CREATE` - разрешает создавать объекты в этой схеме
+- `U` - `USAGE` - разрешает обращаться к объектам этой схемы
+
+Подключимся под пользователем `application`:
+```sql
+\c - application
+
+You are now connected to database "access_privileges" as user "application".
+```
+
+Пользователь `application` является владельцем схемы `application`, потому что он ее создал:
+```sql
+\dn
+
+      List of schemas
+    Name     |    Owner
+-------------+-------------
+ application | application
+ public      | postgres
+(2 rows)
+```
+
+Создадим таблицу `t1` с одной колонкой.
+Она будет создана в схеме `application`, т.к. по умолчанию схема равна имени пользователя:
+```sql
+CREATE TABLE t1(n integer);
+
+CREATE TABLE
+```
+
+Подключимся под суперпользователем:
+```sql
+\c - postgres
+
+You are now connected to database "access_privileges" as user "postgres".
+```
+
+Создадим пользователя `microservice`:
+```sql
+CREATE ROLE microservice LOGIN;
+
+CREATE ROLE
+```
+
+Подключимся под пользователем `microservice`:
+```sql
+\c - microservice
+
+You are now connected to database "access_privileges" as user "microservice".
+```
+
+У пользователя `microservice` нет никаких привилегии обращаться к объектам схемы `application`.
+Попробуем прочитать таблицу `t1`:
+```sql
+SELECT * FROM application.t1;
+
+ERROR:  permission denied for schema application
+LINE 1: SELECT * FROM application.t1;
+```
+
+Подключимся под пользователем `application`:
+```sql
+\c - application
+
+You are now connected to database "access_privileges" as user "application".
+```
+
+Выдадим все привилегии на схему `application` пользователю `microservice`, не перечисляя их явно:
+```sql
+GRANT ALL ON SCHEMA application TO microservice;
+
+GRANT
+```
+
+Проверим привилегии, смотрим вторую подстроку колонки `Access privileges`:
+```sql
+\dn+ application
+
+                            List of schemas
+    Name     |    Owner    |      Access privileges      | Description
+-------------+-------------+-----------------------------+-------------
+ application | application | application=UC/application +|
+             |             | microservice=UC/application |
+(1 row)
+```
+
+
+## Таблицы
+
+Подключимся под пользователем `microservice`:
+```sql
+\c - microservice
+
+You are now connected to database "access_privileges" as user "microservice".
+```
+
+У пользователя `microservice` есть привилегии обращаться к схеме `application`,
+но нет привилегий обращаться к таблице `t1`:
+```sql
+SELECT * FROM application.t1;
+
+ERROR:  permission denied for table t1
+```
+
+
+
+
 
 
 
