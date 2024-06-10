@@ -20,7 +20,7 @@
 ## Скрытая роль public
 
 Роль `public` не отображается в списке ролей, но она существует.
-Все другие роли неявно входят в групповую роль `public`.
+Все другие роли неявно входят в групповую роль `public`, а значит, имеют ее привилегии.
 По умолчанию роль `public` имеет следующие привилегии:
 - для любой БД:
   - `CONNECT` - право подключаться к БД (не путаем с атрибутом `LOGIN` у роли, который позволяет подключаться к кластеру `Postgres`)
@@ -36,7 +36,7 @@
 
 ## Базы данных
 
-Привилегии БД:
+Для БД существуют следующие привилегии:
 - `CONNECT` - разрешает подключение к этой БД 
 - `CREATE` разрешает создавать схемы в этой БД
 - `TEMPORARY` - разрешает создание временных таблиц 
@@ -92,6 +92,10 @@ ERROR:  permission denied for database access_privileges
 
 ### Выдача привилегий
 
+Право выдачи и отзыва привилегий на объект имеют:
+- суперпользователь
+- владелец объекта
+
 Подключимся под суперпользователем:
 ```sql
 \c - postgres
@@ -99,7 +103,7 @@ ERROR:  permission denied for database access_privileges
 You are now connected to database "access_privileges" as user "postgres".
 ```
 
-Выдадим пользователю `application` привилегию на создание схем внутри БД `access_privileges`:
+Дадим пользователю `application` привилегию на создание схем внутри БД `access_privileges`:
 ```sql
 GRANT CREATE ON DATABASE access_privileges TO application;
 
@@ -144,6 +148,36 @@ CREATE SCHEMA
 
 
 ### Отзыв привилегий
+
+Подключимся под суперпользователем:
+```sql
+\c - postgres
+
+You are now connected to database "access_privileges" as user "postgres".
+```
+
+```sql
+REVOKE CREATE ON DATABASE access_privileges FROM application;
+
+REVOKE
+```
+
+Проверим:
+```sql
+\l access_privileges
+                                     List of databases
+       Name        |  Owner   | Encoding |  Collate   |   Ctype    |   Access privileges
+-------------------+----------+----------+------------+------------+-----------------------
+ access_privileges | postgres | UTF8     | en_US.utf8 | en_US.utf8 | =Tc/postgres         +
+                   |          |          |            |            | postgres=CTc/postgres
+(1 row)
+```
+
+
+## Схемы
+
+
+
 
 
 
