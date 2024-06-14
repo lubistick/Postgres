@@ -344,7 +344,7 @@ ERROR:  permission denied for table t1
 ```
 
 
-### Удаление таблицы
+### Удаление объекта
 
 Привилегий на удаление таблицы не существует:
 ```sql
@@ -368,6 +368,150 @@ DROP TABLE t1;
 DROP TABLE
 ```
 
+
+## Колонки таблицы
+
+Некоторые привилегии можно выдать на определенные колонки.
+Создадим таблицу `t2` с двумя колонками:
+```sql
+CREATE TABLE t2(n integer, m integer);
+
+CREATE TABLE
+```
+
+Дадим пользователю `microservice` право на вставку в обе колонки:
+```sql
+GRANT INSERT(n, m) ON t2 TO microservice;
+
+GRANT
+```
+
+И право читать только колонку `n`:
+```sql
+GRANT SELECT(n) ON t2 TO microservice;
+
+GRANT
+```
+
+Посмотрим привилегии таблицы `t2` - в столбце `Column privileges` появились соответствующие права доступа:
+```sql
+\dp t2
+
+                                     Access privileges
+   Schema    | Name | Type  | Access privileges |       Column privileges       | Policies
+-------------+------+-------+-------------------+-------------------------------+----------
+ application | t2   | table |                   | n:                           +|
+             |      |       |                   |   microservice=ar/application+|
+             |      |       |                   | m:                           +|
+             |      |       |                   |   microservice=a/application  |
+(1 row)
+```
+
+Подключимся под пользователем `microservice`:
+```sql
+\c - microservice
+
+You are now connected to database "access_privileges" as user "microservice".
+```
+
+Добавим строку:
+```sql
+INSERT INTO application.t2 VALUES (1, 2);
+
+INSERT 0 1
+```
+
+Все колонки читать не можем:
+```sql
+SELECT * FROM application.t2;
+
+ERROR:  permission denied for table t2
+```
+
+Только колонку `n`:
+```sql
+SELECT n FROM application.t2;
+
+ n 
+---
+ 1
+(1 row)
+```
+
+
+### Изменение строк в таблице
+
+Подключимся под пользователем `application`:
+```sql
+\c - application
+
+You are now connected to database "access_privileges" as user "application".
+```
+
+Дадим пользователю `microservice` право изменять строки (`UPDATE`) в таблице `t2`:
+```sql
+GRANT UPDATE ON t2 TO microservice;
+
+GRANT
+```
+
+Посмотрим привилегии таблицы `t2`:
+```sql
+\dp t2
+
+                                            Access privileges
+   Schema    | Name | Type  |        Access privileges        |       Column privileges       | Policies
+-------------+------+-------+---------------------------------+-------------------------------+----------
+ application | t2   | table | application=arwdDxt/application+| n:                           +|
+             |      |       | microservice=w/application      |   microservice=ar/application+|
+             |      |       |                                 | m:                           +|
+             |      |       |                                 |   microservice=a/application  |
+(1 row)
+```
+
+Подключимся под пользователем `microservice`:
+```sql
+\c - microservice
+
+You are now connected to database "access_privileges" as user "microservice".
+```
+
+Интересно то, что мы получим ошибку при изменении строки:
+```sql
+UPDATE application.t2 SET m = m + 1;
+
+ERROR:  permission denied for table t2
+```
+
+Дело в том, что перед изменением строк, идет их чтение.
+Но привилегии на чтение столбца `m` нет.
+Подключимся под пользователем `application`:
+```sql
+\c - application
+
+You are now connected to database "access_privileges" as user "application".
+```
+
+Дадим право на чтение:
+```sql
+GRANT SELECT ON t2 TO microservice;
+
+GRANT
+```
+
+Подключимся под пользователем `microservice`:
+```sql
+\c - microservice
+
+You are now connected to database "access_privileges" as user "microservice".
+```
+
+Теперь изменение строк работает:
+```sql
+UPDATE application.t2 SET m = m + 1;
+
+UPDATE 1
+```
 
 
 
