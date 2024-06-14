@@ -13,14 +13,14 @@
 
 Категории ролей с точки зрения управления доступом:
 - `суперпользователь` - имеет полный доступ ко всем объектам (проверки доступа не выполняются)
-- `владелец объекта` - изначально получает полный набор привилегий, а также удаление объекта, выдачу и отзыв привилегий на объект
+- `владелец объекта` - изначально получает полный набор привилегий, а также право на удаление объекта, выдачу и отзыв привилегий на объект
 - `остальные роли` - доступ в рамках выданных привилегий
 
 
 ## Скрытая роль public
 
 Роль `public` не отображается в списке ролей, но она существует.
-Все другие роли неявно входят в групповую роль `public`, а значит, имеют ее привилегии.
+Все другие роли неявно входят в групповую роль `public`, а значит, получают ее привилегии.
 По умолчанию роль `public` имеет следующие привилегии:
 - для любой БД:
   - `CONNECT` - право подключаться к БД (не путаем с атрибутом `LOGIN` у роли, который позволяет подключаться к кластеру `Postgres`)
@@ -31,7 +31,7 @@
 - для схем `pg_catalog` и `information_schema`:
   - `USAGE` - право доступа к объектам внутри схемы
 - для любой функции:
-  - `EXECUTE` права выполнять функцию
+  - `EXECUTE` право выполнять функцию
 
 
 ## Базы данных
@@ -56,7 +56,9 @@ You are now connected to database "access_privileges" as user "postgres".
 ```
 
 Посмотрим информацию о БД.
-В колонке `Access privileges` хранятся выданные привилегии (сейчас она пуста):
+В колонке `Access privileges` хранятся выданные привилегии.
+Пустое поле `Access privileges` означает,
+что у владельца (колонка `Owner`) есть полный набор привилегий, а у всех остальных привилегий нет:
 ```sql
 \l access_privileges
 
@@ -75,14 +77,14 @@ CREATE ROLE
 ```
 
 Пользователь `application` не имеет право подключаться к БД - не имеет привилегию `CONNECT`.
-Но он все равно может подключиться к БД, т.к. любой пользователь входит в групповую роль `public`, у которой эта привилегия есть:
+Но он все равно может это сделать, т.к. любой пользователь входит в групповую роль `public`, у которой эта привилегия есть:
 ```sql
 \c - application
 
 You are now connected to database "access_privileges" as user "application".
 ```
 
-А вот создать схему внутри БД не может:
+А вот создать схему внутри БД не может, т.к. не имеет привилегию `CREATE` для БД `access_privileges`:
 ```sql
 CREATE SCHEMA application;
 
@@ -103,14 +105,14 @@ ERROR:  permission denied for database access_privileges
 You are now connected to database "access_privileges" as user "postgres".
 ```
 
-Дадим пользователю `application` привилегию на создание схем внутри БД `access_privileges`:
+Дадим пользователю `application` привилегию на создание схем (`CREATE`) внутри БД `access_privileges`:
 ```sql
 GRANT CREATE ON DATABASE access_privileges TO application;
 
 GRANT
 ```
 
-Посмотрим информацию о БД:
+Посмотрим информацию о БД `access_privileges`:
 ```sql
 \l access_privileges
 
@@ -129,8 +131,9 @@ GRANT
 - `c` - `CONNECT`
 - `T` - `TEMPORARY`
 
-Смотрим третью подстроку:
-пользователь `application` получил привилегию на создание схем `C` от суперпользователя `postgres`.
+Смотрим колонку `Access privileges`:
+- первая подстрока - пустота слева от знака равенства обозначает роль `public`, у которой есть привилегии создавать временные схемы (`T`) и подключаться к БД (`c`)
+- третья подстрока - пользователь `application` получил привилегию на создание схем (`C`) от суперпользователя `postgres`.
 
 Подключимся под пользователем `application`:
 ```sql
@@ -156,6 +159,7 @@ CREATE SCHEMA
 You are now connected to database "access_privileges" as user "postgres".
 ```
 
+Отберем привилегию `CREATE` для БД `access_privileges` у пользователя `application`:
 ```sql
 REVOKE CREATE ON DATABASE access_privileges FROM application;
 
@@ -177,8 +181,8 @@ REVOKE
 ## Схемы
 
 Для схем существуют следующие привилегии:
-- `C` - `CREATE` - разрешает создавать объекты в этой схеме
-- `U` - `USAGE` - разрешает обращаться к объектам этой схемы
+- `CREATE (C)` - разрешает создавать объекты в этой схеме
+- `USAGE (U)` - разрешает обращаться к объектам этой схемы
 
 Подключимся под пользователем `application`:
 ```sql
@@ -228,7 +232,7 @@ CREATE ROLE
 You are now connected to database "access_privileges" as user "microservice".
 ```
 
-У пользователя `microservice` нет никаких привилегии обращаться к объектам схемы `application`.
+У пользователя `microservice` нет прав обращаться к объектам схемы `application`.
 Попробуем прочитать таблицу `t1`:
 ```sql
 SELECT * FROM application.t1;
@@ -244,7 +248,7 @@ LINE 1: SELECT * FROM application.t1;
 You are now connected to database "access_privileges" as user "application".
 ```
 
-Выдадим все привилегии на схему `application` пользователю `microservice`, не перечисляя их явно:
+Выдадим все привилегии на схему `application` пользователю `microservice`, с помощью ключевого слова `ALL`:
 ```sql
 GRANT ALL ON SCHEMA application TO microservice;
 
@@ -266,6 +270,15 @@ GRANT
 
 ## Таблицы
 
+Больше всего привилегий определено для таблиц:
+- `INSERT (a)` - право на вставку строк (append)
+- `SELECT (r)` - право читать таблицу (read)
+- `UPDATE (w)` - право обновлять строки (write)
+- `DELETE (d)` - право удалять строки из таблицы (delete)
+- `TRUNCATE (D)` - право на очистку таблицы
+- `REFERENCES (x)` - право изменять внешние ключи (foreign keys)
+- `TRIGGER (t)` - право создавать триггеры
+
 Подключимся под пользователем `microservice`:
 ```sql
 \c - microservice
@@ -279,6 +292,80 @@ You are now connected to database "access_privileges" as user "microservice".
 SELECT * FROM application.t1;
 
 ERROR:  permission denied for table t1
+```
+
+Подключимся под пользователем `application`:
+```sql
+\c - application
+
+You are now connected to database "access_privileges" as user "application".
+```
+
+Дадим пользователю `microservice` права на чтение таблицы `t1` (`SELECT`):
+```sql
+GRANT SELECT ON t1 TO microservice;
+
+GRANT
+```
+
+Посмотрим привилегии на таблицу `t1`:
+```sql
+\dp t1
+
+                                      Access privileges
+   Schema    | Name | Type  |        Access privileges        | Column privileges | Policies
+-------------+------+-------+---------------------------------+-------------------+----------
+ application | t1   | table | application=arwdDxt/application+|                   |
+             |      |       | microservice=r/application      |                   |
+(1 row)
+```
+
+Подключимся под пользователем `microservice`:
+```sql
+\c - microservice
+
+You are now connected to database "access_privileges" as user "microservice".
+```
+
+Теперь `microservice` может прочитать таблицу `t1`:
+```sql
+SELECT * FROM application.t1;
+
+ n 
+---
+(0 rows)
+```
+
+Но вставить строку не сможет:
+```sql
+INSERT INTO application.t1 VALUES (42);
+
+ERROR:  permission denied for table t1
+```
+
+
+### Удаление таблицы
+
+Привилегий на удаление таблицы не существует:
+```sql
+DROP TABLE application.t1;
+
+ERROR:  must be owner of table t1
+```
+
+Удалить таблицу может только владелец или суперпользователь.
+Подключимся под пользователем `application`:
+```sql
+\c - application
+
+You are now connected to database "access_privileges" as user "application".
+```
+
+Владелец может удалить таблицу:
+```sql
+DROP TABLE t1;
+
+DROP TABLE
 ```
 
 
