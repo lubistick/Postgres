@@ -26,48 +26,90 @@ N * M
 внутренний - последовательно одним из рабочих процессов
 
 
-## Nested Loop
+## Вложенный цикл (Nested Loop)
 
 Так выглядит план для соединения вложенным циклом,
 которое оптимизатор обычно предпочитает для небольших выборок (смотрим перелеты, включенные в два билета):
 
-EXPLAIN (costs off) SELECT * FROM tickets t JOIN ticket_flights tf ON tf.ticked_no = t.ticket_no WHERE t.ticket_no IN ('0005432312164', '0005432312164');
+```sql
+EXPLAIN (costs off)
+SELECT * FROM tickets t
+JOIN ticket_flights tf ON tf.ticket_no = t.ticket_no
+WHERE t.ticket_no IN ('0005432312163', '0005432312164');
 
-[результат]
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Index Scan using tickets_pkey on tickets t
+         Index Cond: (ticket_no = ANY ('{0005432312163,0005432312164}'::bpchar[]))
+   ->  Index Scan using ticket_flights_pkey on ticket_flights tf
+         Index Cond: (ticket_no = t.ticket_no)
+(5 rows)
+```
 
-- Узел Nested Loop обращается к первому (внешнему) набору за первой строкой.
-Здесь это - узел Index Scan по билетам.
-- Затем Nested Loop обращается ко второму (внутреннему) набору и просит выдать все строки,
+План запроса:
+- Узел `Nested Loop` обращается к первому (внешнему) набору за первой строкой.
+Здесь это - узел `Index Scan` по билетам `tickets`.
+- Узел `Nested Loop` обращается ко второму (внутреннему) набору и просит выдать все строки,
 соответствующие строке первого набора.
-Здесь это - узел Index Scan по перелетам.
+Здесь это - узел `Index Scan` по перелетам `ticket_flights`.
 - Процесс повторяется до тех пор, пока внешний набор не исчерпает все строки.
 
 
 Посмотрим на оцененую стоимость.
-EXPLAIN SELECT * FROM tickets t JOIN ticket_flights tf ON tf.ticked_no = t.ticket_no WHERE t.ticket_no IN ('0005432312164', '0005432312164');
 
-[результат]
+```sql
+EXPLAIN
+SELECT * FROM tickets t
+JOIN ticket_flights tf ON tf.ticket_no = t.ticket_no
+WHERE t.ticket_no IN ('0005432312163', '0005432312164');
 
-Первая компонента стоимости Nested Loop - сумма первых компонент стоимости дочерних узлов (Index Scan).
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Nested Loop  (cost=0.99..46.10 rows=6 width=136)
+   ->  Index Scan using tickets_pkey on tickets t  (cost=0.43..12.89 rows=2 width=104)
+         Index Cond: (ticket_no = ANY ('{0005432312163,0005432312164}'::bpchar[]))
+   ->  Index Scan using ticket_flights_pkey on ticket_flights tf  (cost=0.56..16.57 rows=3 width=32)
+         Index Cond: (ticket_no = t.ticket_no)
+(5 rows)
+```
 
-Вторая компонента стоимости Nested Loop складывается из:
-- стоимости получения данных от внешнего набора (вторая компонента Index Scan по билетам)
-- стоимости получения данных от внутреннего набора (вторая компонента Index Scan по перелетам), умноженной на число строк внешнего набора (2 строки)
-- процессорного времени на обработку строк
+- Начальная стоимость `Nested Loop` (`0.99`) - сумма первых компонент стоимости дочерних узлов `Index Scan` (`0.43` и `0.56`).
+- Конечная стоимость `Nested Loop` складывается из:
+    - стоимости получения данных от внешнего набора (вторая компонента `Index Scan` по билетам `tickets`)
+    - стоимости получения данных от внутреннего набора (вторая компонента `Index Scan` по перелетам `ticket_flights`), умноженной на число строк внешнего набора (`2` строки)
+    - процессорного времени на обработку строк
 
-В общем случае формула более сложная, но основной вывод: стоимость пропорциональна N * M, где N и M - число строк в соединяемых наборах данных.
+В общем случае формула более сложная, но основной вывод: стоимость пропорциональна `N * M`, где `N` и `M` - число строк в соединяемых наборах данных.
 
 
-Команда EXPLAIN ANALYZE позволяет узнать, сколько раз на самом деле выполнялся вложенный цикл (loops)
-и сколько в среднем было выбрано строк (rows) и потрачено времени (time) за один раз.
-Видно, что планировщик немного ошибся - получилось 8 строк вместо 6.
+Выполним `EXPLAIN ANALYZE`:
 
-EXPLAIN (costs off, ANALYZE) SELECT * FROM tickets t JOIN ticket_flights tf ON tf.ticked_no = t.ticket_no WHERE t.ticket_no IN ('0005432312164', '0005432312164');
+```sql
+EXPLAIN (costs off, ANALYZE)
+SELECT * FROM tickets t
+JOIN ticket_flights tf ON tf.ticket_no = t.ticket_no
+WHERE t.ticket_no IN ('0005432312163', '0005432312164');
 
-[результат]
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Nested Loop (actual time=3.602..4.898 rows=8 loops=1)
+   ->  Index Scan using tickets_pkey on tickets t (actual time=0.066..0.085 rows=2 loops=1)
+         Index Cond: (ticket_no = ANY ('{0005432312163,0005432312164}'::bpchar[]))
+   ->  Index Scan using ticket_flights_pkey on ticket_flights tf (actual time=1.770..2.396 rows=4 loops=2)
+         Index Cond: (ticket_no = t.ticket_no)
+ Planning Time: 0.572 ms
+ Execution Time: 4.974 ms
+(7 rows)
+```
+
+Плане запроса:
+- `loops` имеет значение `1` - сколько раз выполнялся вложенный цикл.
+- `rows` имеет значение `8` - сколько в среднем было выбрано строк. Видно, что планировщик немного ошибся - получилось `8` строк вместо `6`.
+- `time` - сколько потрачено времени за один раз.
 
 Предупреждение: вывод времени выполнения каждого шага, как в этом примере, может существенно замедлять выполнение запроса на некоторых платформах.
-Если такая информация не нужна, лучше указывать фразу TIMING OFF.
+Если такая информация не нужна, лучше указывать фразу `TIMING OFF`.
 
 
 ## Модификации
