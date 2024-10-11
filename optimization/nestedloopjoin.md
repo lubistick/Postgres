@@ -114,49 +114,118 @@ WHERE t.ticket_no IN ('0005432312163', '0005432312164');
 
 ## Модификации
 
-Существует несколько модификаций алгоритма. Для левого соединения:
+Существует несколько модификаций алгоритма `Nested Loop`.
 
-EXPLAIN (COSTS OFF) SELECT * FROM aircrafts a LEFT JOIN seats s ON a.aircraft_code = s.aircraft_code WHERE a.model LIKE 'Аэробус%';
+### Nested Loop Left Join
+ 
+Модификация `Left Join` возвращает строки левого набора, даже если им не нашлось соответствия в правом наборе:
 
-[результат]
+```sql
+EXPLAIN (COSTS OFF) SELECT * FROM aircrafts a
+LEFT JOIN seats s ON a.aircraft_code = s.aircraft_code
+WHERE a.model LIKE 'Аэробус%';
 
-Эта модификация возвращает строки, даже если для левого (a) набора строк не нашлось соответствия в правом (s) наборе.
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Nested Loop Left Join
+   ->  Seq Scan on aircrafts_data ml
+         Filter: ((model ->> lang()) ~~ 'Аэробус%'::text)
+   ->  Bitmap Heap Scan on seats s
+         Recheck Cond: (ml.aircraft_code = aircraft_code)
+         ->  Bitmap Index Scan on seats_pkey
+               Index Cond: (aircraft_code = ml.aircraft_code)
+(7 rows)
+```
 
-Такая же модификация есть и для правого соединения.
-Но надо помнить что планировщик сам определяет порядок, в котором соединяются таблицы,
-независимо от того, как они перечислены в запросе.
-
-
-Антисоединение возвращает строки одного набора, если только для них не нашлось соответствия в другом наборе.
-Такая модификация может использоваться для обработки предиката NOT EXISTS:
-
-EXPLAIN (COSTS OFF) SELECT * FROM aircrafts a WHERE a.model LIKE 'Аэробус%' AND NOT EXISTS (SELECT * FROM seats s WHERE s.aircraft_code = a.aircraft_code);
-
-[результат]
-
-Таже операция антисоединения используется и для аналогичного запроса, записанного иначе:
-
-EXPLAIN (COSTS OFF) SELECT * FROM aricrafts a LEFT JOIN seats s ON a.aircraft_code = s.aircraft_code WHERE a.model LIKE 'Аэробус%' AND s.aircraft_code IS NULL;
-
-[результат]
+Такая же модификация есть и для правого соединения `Right Join`.
+Планировщик сам определяет порядок соединения таблиц, независимо от их порядка в запросе.
 
 
-Для предиката EXISTS может использоваться полусоединение, которое возвращает строки одного набора,
-если для них нашлось хотя бы одно соответствие в другом наборе.
+### Nested Loop Anti Join
 
-EXPLAIN SELECT * FROM aircrafts a WHERE a.model LIKE 'Аэробус%' AND EXISTS (SELECT * FROM seats s WHERE s.aircraft_code = a.aircraft_code);
+Модификация `Anti Join` возвращает строки одного набора, если для них нет соответствия в другом наборе:
 
-[результат]
+```sql
+EXPLAIN (COSTS OFF) SELECT * FROM aircrafts a
+WHERE a.model LIKE 'Аэробус%' AND NOT EXISTS (
+      SELECT * FROM seats s WHERE s.aircraft_code = a.aircraft_code
+);
 
-Обратите внимание: хотя в плане для таблицы s указано rows 149, на самом деле достаточно получить всего одну строку, чтобы понять значение предиката EXISTS.
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Nested Loop Anti Join
+   ->  Seq Scan on aircrafts_data ml
+         Filter: ((model ->> lang()) ~~ 'Аэробус%'::text)
+   ->  Index Only Scan using seats_pkey on seats s
+         Index Cond: (aircraft_code = ml.aircraft_code)
+(5 rows)
+```
 
-PostgreSQL так и делает (actual rows):
+Модификация `Anti Join` используется и для аналогичного запроса, записанного иначе:
 
-EXPLAIN (COSTS OFF, ANALYZE) SELECT * FROM aircrafts a WHERE a.model LIKE 'Аэробус%' AND EXISTS (SELECT * FROM seats s WHERE s.aircraft_code = a.aircraft_code);
+```sql
+EXPLAIN (COSTS OFF) SELECT * FROM aircrafts a
+LEFT JOIN seats s ON a.aircraft_code = s.aircraft_code
+WHERE a.model LIKE 'Аэробус%' AND s.aircraft_code IS NULL;
 
-[результат]
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Nested Loop Anti Join
+   ->  Seq Scan on aircrafts_data ml
+         Filter: ((model ->> lang()) ~~ 'Аэробус%'::text)
+   ->  Index Scan using seats_pkey on seats s
+         Index Cond: (aircraft_code = ml.aircraft_code)
+(5 rows)
+```
 
-Модификации алгоритма вложенного цикла для полного соединения (FULL JOIN) не существует.
+
+### Nested Loop Semi Join
+
+Модификация `Semi Join` возвращает строки одного набора, если для них нашлось хотя бы одно соответствие в другом наборе:
+
+```sql
+EXPLAIN SELECT * FROM aircrafts a
+WHERE a.model LIKE 'Аэробус%' AND EXISTS (
+      SELECT * FROM seats s WHERE s.aircraft_code = a.aircraft_code
+);
+
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Nested Loop Semi Join  (cost=0.28..4.02 rows=1 width=52)
+   ->  Seq Scan on aircrafts_data ml  (cost=0.00..3.39 rows=1 width=52)
+         Filter: ((model ->> lang()) ~~ 'Аэробус%'::text)
+   ->  Index Only Scan using seats_pkey on seats s  (cost=0.28..6.88 rows=149 width=4)
+         Index Cond: (aircraft_code = ml.aircraft_code)
+(5 rows)
+```
+
+Обратим внимание, в плане для таблицы `seats` указано `rows` равным `149`.
+На самом деле, достаточно получить всего одну строку, чтобы понять значение предиката `EXISTS`.
+
+Postgres так и делает:
+
+```sql
+EXPLAIN (COSTS OFF, ANALYZE) SELECT * FROM aircrafts a
+WHERE a.model LIKE 'Аэробус%' AND EXISTS (
+      SELECT * FROM seats s WHERE s.aircraft_code = a.aircraft_code
+);
+
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Nested Loop Semi Join (actual time=9.200..9.256 rows=3 loops=1)
+   ->  Seq Scan on aircrafts_data ml (actual time=6.407..6.438 rows=3 loops=1)
+         Filter: ((model ->> lang()) ~~ 'Аэробус%'::text)
+         Rows Removed by Filter: 6
+   ->  Index Only Scan using seats_pkey on seats s (actual time=0.928..0.928 rows=1 loops=3)
+         Index Cond: (aircraft_code = ml.aircraft_code)
+         Heap Fetches: 0
+ Planning Time: 0.199 ms
+ Execution Time: 9.316 ms
+(9 rows)
+```
+
+### Модификации для FULL JOIN не существует
+
 Это связано с тем, что полный проход по второму набору строк может не выполняться.
 Если пренебречь производительностью, полное соединение можно получить, объединив левое соединение и антисоединение.
 Такой способ может пригодиться, т.к. FULL JOIN (как мы увидим позже) работает только с эквисоединениями.
@@ -166,12 +235,29 @@ EXPLAIN (COSTS OFF, ANALYZE) SELECT * FROM aircrafts a WHERE a.model LIKE 'Аэ�
 
 Найдем всех пассажиров, купивших билеты на определенный рейс:
 
-EXPLAIN (COSTS OFF) SELECT t.passenger_name FROM tickets t JOIN ticket_flight tf ON tf.ticket_no = t.ticket_no JOIN flights f ON f.flight_id = tf.flight_id WHERE f.flight_id = 12345;
+```sql
+EXPLAIN (COSTS OFF) SELECT t.passenger_name FROM tickets t
+JOIN ticket_flights tf ON tf.ticket_no = t.ticket_no
+JOIN flights f ON f.flight_id = tf.flight_id
+WHERE f.flight_id = 12345;
 
-[результат]
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Nested Loop
+   ->  Index Only Scan using flights_pkey on flights f
+         Index Cond: (flight_id = 12345)
+   ->  Gather
+         Workers Planned: 2
+         ->  Nested Loop
+               ->  Parallel Seq Scan on ticket_flights tf
+                     Filter: (flight_id = 12345)
+               ->  Index Scan using tickets_pkey on tickets t
+                     Index Cond: (ticket_no = tf.ticket_no)
+(10 rows)
+```
 
-На верхнем уровне используется соединение вложенным циклом. Внешний набор данных состоит из одной строки,
-полученной из таблицы рейсов (flights) по уникальному индексу.
-
+На верхнем уровне используется соединение вложенным циклом.
+Внешний набор данных состоит из одной строки, полученной из таблицы `flights` (рейсы) по уникальному индексу.
 Для получения внутреннего набора используется параллельный план.
-Каждый из процессов читает свою часть таблицы перелетов (tickets_flights) и соединяет ее с билетами (tickets) с помощью другого вложенного цикла.
+Каждый из процессов читает свою часть таблицы `tickets_flights` (перелеты)
+и соединяет ее с таблицей `tickets` (билеты) с помощью другого вложенного цикла.
