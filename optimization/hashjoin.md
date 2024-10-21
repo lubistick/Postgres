@@ -261,29 +261,71 @@ JOIN tickets t ON b.book_ref = t.book_ref AND b.total_amount::text > t.passenger
 `Memory Usage` вырос до `127 431 kB`.
 
 
-Теперь уменьшим work_mem так, чтобы хеш-таблица не поместилась, и включим вывод сообщений о временных файлах:
+### Двухпроходное соединение
+
+Применяется, когда хеш-таблица не помещается в оперативную память.
+Наборы данных разбиваются на пакеты и последовательно соединяются.
+
+Уменьшим `work_mem` и `hash_mem_multiplier` так, чтобы хеш-таблица не поместилась в оперативную память.
 ```sql
 SET work_mem = '32MB';
+
+SET
 ```
 
 ```sql
-SET log_temp_files = 0;
+SET hash_mem_multiplier = 1;
+
+SET
 ```
+
+Включим вывод сообщений о временных файлах.
+```sql
+SET log_temp_files = 0;
+
+SET
+```
+
 Если в нашем сеансе будут создаваться временные файлы размером больше, чем 0 байт, значит информацию о них нужно записывать в журнал.
 Можно поставить размер больше, если маленькие файлы нас не интересуют.
 Но нас в принципе интересует, какие файлы создавались.
 
 ```sql
-EXPLAIN (COSTS OFF, TIMING OFF, ANALYZE) SELECT b.book_ref FROM bookings b JOIN tickets t ON b.book_ref = t.book_ref; 
+EXPLAIN (COSTS OFF, TIMING OFF, ANALYZE) SELECT b.book_ref FROM bookings b JOIN tickets t ON b.book_ref = t.book_ref;
+
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Hash Join (actual rows=2949857 loops=1)
+   Hash Cond: (t.book_ref = b.book_ref)
+   ->  Seq Scan on tickets t (actual rows=2949857 loops=1)
+   ->  Hash (actual rows=2111110 loops=1)
+         Buckets: 1048576  Batches: 4  Memory Usage: 28291kB
+         ->  Seq Scan on bookings b (actual rows=2111110 loops=1)
+ Planning Time: 12.168 ms
+ Execution Time: 3297.194 ms
+(8 rows)
 ```
 
 Время выполнения запроса возросло.
-Потребовалось 4 пакета: один из них сразу же загружается в оперативную память, а для 3-х других создадутся файлы на диске.
+Потребовалось 4 пакета: один из них сразу же загружается в оперативную память, а для 3-х других создаются файлы на диске.
 Т.е. 3 файла, которые потом будут загружаться в хеш-таблицу и еще 3 файла для второго набора данных.
 
 Посмотрим сообщения о временных файлах в журнале - поскольку были использованы 4 пакета, то файлов будет (4 - 1) * 2 = 6:
 ```bash
-tail -n 18 /var/log/postgresql/postgresql-10-main.log (исправить путь)
+tail -n 12 /var/lib/postgresql/data/log/postgresql-2024-10-21_011020.log
+
+2024-10-21 01:32:15.151 UTC [54] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp54.82", size 14257782
+2024-10-21 01:32:15.151 UTC [54] STATEMENT:  EXPLAIN (COSTS OFF, TIMING OFF, ANALYZE) SELECT b.book_ref FROM bookings b JOIN tickets t ON b.book_ref = t.book_ref;
+2024-10-21 01:32:15.412 UTC [54] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp54.84", size 19925217
+2024-10-21 01:32:15.412 UTC [54] STATEMENT:  EXPLAIN (COSTS OFF, TIMING OFF, ANALYZE) SELECT b.book_ref FROM bookings b JOIN tickets t ON b.book_ref = t.book_ref;
+2024-10-21 01:32:15.523 UTC [54] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp54.81", size 14265342
+2024-10-21 01:32:15.523 UTC [54] STATEMENT:  EXPLAIN (COSTS OFF, TIMING OFF, ANALYZE) SELECT b.book_ref FROM bookings b JOIN tickets t ON b.book_ref = t.book_ref;
+2024-10-21 01:32:15.789 UTC [54] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp54.83", size 19938042
+2024-10-21 01:32:15.789 UTC [54] STATEMENT:  EXPLAIN (COSTS OFF, TIMING OFF, ANALYZE) SELECT b.book_ref FROM bookings b JOIN tickets t ON b.book_ref = t.book_ref;
+2024-10-21 01:32:15.879 UTC [54] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp54.80", size 14228595
+2024-10-21 01:32:15.879 UTC [54] STATEMENT:  EXPLAIN (COSTS OFF, TIMING OFF, ANALYZE) SELECT b.book_ref FROM bookings b JOIN tickets t ON b.book_ref = t.book_ref;
+2024-10-21 01:32:16.128 UTC [54] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp54.85", size 19888605
+2024-10-21 01:32:16.128 UTC [54] STATEMENT:  EXPLAIN (COSTS OFF, TIMING OFF, ANALYZE) SELECT b.book_ref FROM bookings b JOIN tickets t ON b.book_ref = t.book_ref;
 ```
 
 По размеру видно, что часть файлов относится к первой таблице (они меньше), а часть - ко второй (они больше).
