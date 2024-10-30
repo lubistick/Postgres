@@ -71,17 +71,36 @@ JOIN ticket_flights tf ON tf.ticket_no = t.ticket_no ORDER BY t.ticket_no;
 
 В отличие от соединения хешированием, слияние без сортировки хорошо подходит для случая, когда надо быстро получить первые строки:
 ```sql
-EXPLAIN SELECT * FROM tickets t JOIN ticket_flights tf ON tf.ticket_no = t.ticket_no ORDER BY t.ticket_no LIMIT 1000;
+EXPLAIN SELECT * FROM tickets t
+JOIN ticket_flights tf ON tf.ticket_no = t.ticket_no ORDER BY t.ticket_no LIMIT 1000;
+
+                                                     QUERY PLAN                                                      
+---------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=8.44..106.42 rows=1000 width=136)
+   ->  Merge Join  (cost=8.44..822282.10 rows=8391960 width=136)
+         Merge Cond: (t.ticket_no = tf.ticket_no)
+         ->  Index Scan using tickets_pkey on tickets t  (cost=0.43..139110.29 rows=2949857 width=104)
+         ->  Index Scan using ticket_flights_pkey on ticket_flights tf  (cost=0.56..570902.89 rows=8391960 width=32)
+(5 rows)
 ```
 
-Обратите внимание и на то, как уменьшилась общая стоимость.
+Общая стоимость значительно уменьшилась, т.к. не надо перебирать наборы до конца.
 
-
-Если нужного индекса не окажется, придется выполнять сортировку в узле Sort.
-Тогда первая компонента стоимости будет не меньше стоимости сортировки, и первые строки запрос не сможет выдавать без задержки.
-Вот пример такого плана (здесь явная сортировка выбрана из-за небольшого размера таблицы):
+Если нужного индекса не окажется, Postgres выполнит сортировку в узле `Sort`.
+Тогда начальная стоимость узла `Merge Join` будет не меньше общей стоимости сортировки, и первые строки запрос не сможет выдавать без задержки.
+Пример такого плана:
 ```sql
 EXPLAIN SELECT * FROM aircrafts a JOIN seats s ON a.aircraft_code = s.aircraft_code ORDER BY a.aircraft_code;
+
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Merge Join  (cost=1.51..420.71 rows=1339 width=67)
+   Merge Cond: (s.aircraft_code = ml.aircraft_code)
+   ->  Index Scan using seats_pkey on seats s  (cost=0.28..64.60 rows=1339 width=15)
+   ->  Sort  (cost=1.23..1.26 rows=9 width=52)
+         Sort Key: ml.aircraft_code
+         ->  Seq Scan on aircrafts_data ml  (cost=0.00..1.09 rows=9 width=52)
+(6 rows)
 ```
 
 
@@ -155,3 +174,8 @@ ORDER BY t.ticket_no;
 
 Здесь соединяются tickets (билеты) и boarding_passes (посадочные талоны),
 и с этим, уже отсортированным по номерам билетов, набором строк соединяются ticket_flights (перелеты).
+
+
+## Параллельные планы
+
+(дописать)
