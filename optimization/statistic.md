@@ -115,8 +115,51 @@ SELECT 214867 * (1 - 0.421667) / (103 - 10);
 ```
 
 
+## Гистограмма
+
+При условиях "больше" и "меньше" для оценки будет использоваться список наиболее частых значений, или гистограмма, или оба способа вместе.
+Гистограмма строится так, чтобы не включать наиболее частые значения и NULL:
+```sql
+SELECT histogram_bounds FROM pg_stats s WHERE s.tablename = 'flights' AND s.attname = 'departure_airport';
+```
+
+Число корзин гистограммы определяется параметром default_statistics_target, а границы выбираются так, чтобы в каждой корзине находилось примерно одинаковое количество значений.
+
+Рассмотрим пример:
+```sql
+EXPLAIN SELECT * FROM flights WHERE departure_airport < 'HMA';
+```
+
+Точное значение:
+```sql
+SELECT count(*) FROM flights WHERE departure_airport < 'HMA';
+```
 
 
+Как получена оценка?
+
+Учтем частоту наиболее частых значений, попадающих в указанный интервал:
+```sql
+SELECT sum(s.most_common_freqs[array_position((s.most_common_vals::text::text[]), v)])
+FROM pg_stats s, unnest(s.most_common_vals::text::text[]) v
+WHERE s.tablename = 'flights' AND s.attname = 'departure_airport' AND v < 'HMA';
+```
+
+Указанный интервал занимает ровно 2 корзины гистограммы из 10, а неопределенных значений в данном столбце нет, получаем следующую оценку:
+```sql
+SELECT 214867 * (1 - 0.421667) * (2.0 / 10.0) + 214867 * 0.138667;
+```
+
+В общем случае учитываются и не полностью занятые корзины (с помощью линейной аппроксимации).
+
+
+## Расширенная статистика
+
+Рассмотрим запрос с двумя условиями:
+```sql
+SELECT count(*) FROM flights WHERE flight_no = 'PG0007' AND departure_airport = 'VKO';
+```
+...35:47
 
 
 
