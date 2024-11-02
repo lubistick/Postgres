@@ -159,7 +159,53 @@ SELECT 214867 * (1 - 0.421667) * (2.0 / 10.0) + 214867 * 0.138667;
 ```sql
 SELECT count(*) FROM flights WHERE flight_no = 'PG0007' AND departure_airport = 'VKO';
 ```
-...35:47
+
+Оценка оказывается сильно заниженной:
+```sql
+EXPLAIN SELECT * FROM flights WHERE flight_no = 'PG0007' AND departure_airport = 'VKO';
+```
+
+Причина в том, что планировщик полагается на то,
+что предикаты не коррелированы и считает общую селективность как произведение селективностей условий, объединенных логическим "и".
+Это хорошо видно в приведенном плане:
+оценка в узле Bitmap Index Scan (условия на flight_no) одна,
+а после фильтрации в узле Bitmap Index Scan (условия на departure_airport) - другая.
+
+Однако мы понимаем, что номер рейса однозначно определяет аэропорт отправления:
+фактически, второе условие избыточно (конечно, считая, что аэропорт указан правильно).
+
+Начиная с версии PostgreSQL 10, это можно объяснить планировщику с помощью статистики по функциональной зависимости:
+```sql
+CREATE STATISTICS flights1(dependencies) ON flight_no, departure_airport FROM flights;
+```
+
+```sql
+ANALYZE flights;
+```
+
+```sql
+EXPLAIN SELECT * FROM flights WHERE flight_no = 'PG0007' AND departure_airport = 'VKO';
+```
+
+Теперь оценка улучшилась.
+
+Другая ситуация, в которой планировщик ошибается с оценкой, связана с группировкой:
+```sql
+SELECT count(*) FROM (
+  SELECT DISTINCT departure_airport, arrival_airport FROM flights 
+) t;
+```
+
+```sql
+EXPLAIN SELECT DISTINCT departure_airport, arrival_airport FROM flights;
+```
+
+
+Расширенная статистика позволяет исправить и эту оценку:
+```sql
+
+```
+...42:55
 
 
 
