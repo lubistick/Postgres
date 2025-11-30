@@ -1,0 +1,15 @@
+# Два экземпляра кластера нужны для главы "Резервное комирование" и главы "Репликация".
+# Из контейнера postgres-replica можно подключиться к контейнеру postgres-main через Docker DNS по имени сервиса, т.к. они находятся в рамках одной сети.
+
+services:
+  postgres-main:
+    image: postgres:18-alpine
+    container_name: postgres-main
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      
+  postgres-replica:
+    image: postgres:18-alpine
+    container_name: postgres-replica
+    environment:
+      - POSTGRES_PASSWORD=postgres
