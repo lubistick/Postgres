@@ -13,3 +13,6 @@ services:
     container_name: postgres-replica
     environment:
       - POSTGRES_PASSWORD=postgres
+    # Если контейнере выключить кластер (например убив процесс postgres), контейнер завершит работу
+    # Чтобы сымитировать выключенный кластер, надо заменить запуск кластера на команду ниже
+    command: ["sleep", "infinity"]

@@ -232,48 +232,84 @@ SELECT * FROM t;
 ## Физическое копирование
 
 Физическая резервная копия представляет собой копию файловой системы с Postgres кластером.
-Она используется механизмом восстановления после сбоя.
-Для этого требуются:
-- копия файлов кластера (базовая резервная копия)
-- набор журналов предзаписи, необходимых для восстановления согласованности
-
-Если файловая система уже согласована (копия снималась при корректно остановленном сервере), то журналы не требуются. Есть возможность создать копию "на лету", не выключая сервер.
-
 Нельзя восстановить отдельную БД, а только кластер целиком на определенный момент времени.
+Есть возможность создать копию "на лету", не выключая сервер.
 
+В корне проекта заранее подготовлен файл `docker-compose.yaml` с двумя кластерами.
+Будем делать копию кластера "postgres-main" в "postgres-replica".
+Кластер "postgres-replica" должен быть остановлен, для этого раскомментируем `command: ["sleep", "infinity"]`.
 
-### Автономная резервная копия
+Запустим кластеры:
+
+```bash
+docker compose up -d
+[+] Running 3/3
+ ✔ Network postgres_default       Created     0.0s
+ ✔ Container postgres-main        Started     0.1s
+ ✔ Container postgres-replica     Started     0.1s
+```
+
+Зайдем в кластер мэйн:
+
+```bash
+docker exec -ti postgres-main sh
+
+/ #
+```
+
+В другом окне терминала заходим в реплику:
+
+```bash
+docker exec -ti postgres-replica sh
+
+/ #
+```
 
 Для создания горячей резервной копии существует утилита `pg_basebackup`.
 Вначале утилита выполняет контрольную точку, затем копируется файловая система кластера.
-Все файлы WAL, сгенерированные сервером за время от контрольной точки до окончания копирования файлов, также копируются в резервную копию. Такая копия называется автономной.
+А также все файлы WAL, сгенерированные сервером за время от контрольной точки до окончания копирования файлов.
 
-Для восстановления достаточно развернуть резервную копию и запустить сервер.
-При необходимости он выполнит восстановление согасованности с помощью файлов WAL и будет готов к работе.
+Из консоли "postgres-replica" сделаем бэкап кластера "postgres-main":
+```bash
+pg_basebackup -U postgres -h postgres-main --pgdata /home/basebackup
 
-Чтобы сохранить файлы WAL, утилита подключается к серверу по специальному протоколу репликации.
-Протокол используется и для репликации, и для резервного копирования.
+pg_basebackup: error: connection to server at "postgres-main" (172.22.0.3), port 5432 failed: FATAL:  no pg_hba.conf entry for replication connection from host "172.22.0.2", user "postgres", no encryption
+```
 
-Для подключения необходим ряд настроек.
-Параметр `wal_level`, определяющий количество информации в журнале, должен быть установлен в значение `replica`.
-Параметр `max_wal_senders` должен быть утановлен в достаточно большое значение.
-Этот параметр ограничивает число одновременно работающих процессов `wal_sender`, обслуживающих подключение по протоколу репликации.
+Мы получили ошибку. Для подключения необходим ряд настроек на том кластере, который мы будем копировать (т.е. нужно настроить мэйн).
 
-Проверим:
+
+### Настройка
+
+1. Утилита `pg_basebackup` подключается к серверу по специальному протоколу репликации.
+Параметр `wal_level`, определяющий количество информации в журнале, должен быть установлен в значение `replica`:
+```sql
+SELECT name, setting FROM pg_settings WHERE name IN ('wal_level');
+
+   name    | setting 
+-----------+---------
+ wal_level | replica
+(1 row)
+```
+
+2. Параметр `max_wal_senders` должен быть утановлен в достаточно большое значение.
+Этот параметр ограничивает число одновременно работающих процессов `wal_sender`, обслуживающих подключение по протоколу репликации:
 
 ```sql
-SELECT name, setting FROM pg_settings WHERE name IN ('wal_level', 'max_wal_senders');
+SELECT name, setting FROM pg_settings WHERE name IN ('max_wal_senders');
 
       name       | setting 
 -----------------+---------
  max_wal_senders | 10
- wal_level       | replica
-(2 rows)
+(1 row)
 ```
 
-Роль должна обладать атрибутом `REPLICATION` или быть суперпользователем.
-Также роли должно быть выдано разрешение в конфигурационном файле `pg_hba.conf`.
+3. Роль должна обладать атрибутом `REPLICATION` или быть суперпользователем.
+Пользовать "postgres" является суперпользователем.
+
+4. Роли должно быть выдано разрешение в конфигурационном файле `pg_hba.conf`.
 Разрешение на локальное подключение по протоколу репликации прописано по умолчанию:
+
 ```sql
 select type, database, user_name, address, auth_method
 from pg_hba_file_rules()
@@ -286,4 +322,90 @@ where 'replication' = ANY(database);
  host  | {replication} | {all}     | ::1       | trust
 (3 rows)
 ```
+
+Итак, ошибка возникла, потому что в файле `pg_hba.conf` отсетствует правило для репликационных подключений от хоста "172.22.0.2" с пользователем "postgres".
+
+Поправим конфиг через vim:
+
+```bash
+vi $PGDATA/pg_hba.conf
+```
+
+Добавим строку `host replication postgres 0.0.0.0/0 trust`, разрешающую подключение с любого айпи (на реальном кластере так делать не надо).
+Получилось так:
+```bash
+tail $PGDATA/pg_hba.conf
+
+# IPv6 local connections:
+host    all             all             ::1/128                 trust
+# Allow replication connections from localhost, by a user with the
+# replication privilege.
+local   replication     all                                     trust
+host    replication     all             127.0.0.1/32            trust
+host    replication     all             ::1/128                 trust
+host    replication     postgres        0.0.0.0/0               trust
+```
+
+Как альтернатива, мы могли бы указать такой айпи: `172.22.0.2/16`.
+
+Перезагрузим конфигурацию сервера:
+
+```sql
+SELECT pg_reload_conf();
+
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+```
+
+Теперь попробуем сделать копию из терминала с репликой:
+
+```bash
+pg_basebackup -U postgres -h postgres-main --pgdata /home/basebackup
+```
+
+Ошибок нет. Проверим папку с копией:
+
+```bash
+ls -la /home/basebackup
+
+total 268
+drwx------   19 root     root          4096 Dec  7 11:11 .
+drwxr-xr-x    1 root     root          4096 Dec  7 11:11 ..
+-rw-------    1 root     root             3 Dec  7 11:11 PG_VERSION
+-rw-------    1 root     root           225 Dec  7 11:11 backup_label
+-rw-------    1 root     root        137645 Dec  7 11:11 backup_manifest
+drwx------    5 root     root          4096 Dec  7 11:11 base
+drwx------    2 root     root          4096 Dec  7 11:11 global
+drwx------    2 root     root          4096 Dec  7 11:11 pg_commit_ts
+drwx------    2 root     root          4096 Dec  7 11:11 pg_dynshmem
+-rw-------    1 root     root          5823 Dec  7 11:11 pg_hba.conf
+-rw-------    1 root     root          2681 Dec  7 11:11 pg_ident.conf
+drwx------    4 root     root          4096 Dec  7 11:11 pg_logical
+drwx------    4 root     root          4096 Dec  7 11:11 pg_multixact
+drwx------    2 root     root          4096 Dec  7 11:11 pg_notify
+drwx------    2 root     root          4096 Dec  7 11:11 pg_replslot
+drwx------    2 root     root          4096 Dec  7 11:11 pg_serial
+drwx------    2 root     root          4096 Dec  7 11:11 pg_snapshots
+drwx------    2 root     root          4096 Dec  7 11:11 pg_stat
+drwx------    2 root     root          4096 Dec  7 11:11 pg_stat_tmp
+drwx------    2 root     root          4096 Dec  7 11:11 pg_subtrans
+drwx------    2 root     root          4096 Dec  7 11:11 pg_tblspc
+drwx------    2 root     root          4096 Dec  7 11:11 pg_twophase
+drwx------    4 root     root          4096 Dec  7 11:11 pg_wal
+drwx------    2 root     root          4096 Dec  7 11:11 pg_xact
+-rw-------    1 root     root            88 Dec  7 11:11 postgresql.auto.conf
+-rw-------    1 root     root         32307 Dec  7 11:11 postgresql.conf
+```
+
+Получилось.
+
+
+todo дописать
+
+Для восстановления достаточно развернуть резервную копию и запустить сервер.
+При необходимости он выполнит восстановление согасованности с помощью файлов WAL и будет готов к работе.
+
+
 
