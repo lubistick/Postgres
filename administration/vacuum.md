@@ -579,3 +579,106 @@ SELECT pg_reload_conf();
  t
 (1 row)
 ```
+
+
+## Последовательное сканирование и мертвые версии строк
+
+Создадим копию таблицы "flights", отключив для нее автоочистку, чтобы мертвые версии строк не удалялись автоматически:
+```sql
+CREATE TABLE flights_copy WITH (autovacuum_enabled = false) AS SELECT * FROM flights;
+
+SELECT 214867
+```
+
+Проверим размер полученной таблицы:
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('flights_copy'));
+
+ pg_size_pretty 
+----------------
+ 21 MB
+(1 row)
+```
+
+Удалим все строки из этой таблицы:
+```sql
+DELETE FROM flights_copy;
+
+DELETE 214867
+```
+
+Мертвые версии строк останутся в файле таблицы до ближайшей очистки, поэтому размер таблицы останется прежним:
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('flights_copy'));
+
+ pg_size_pretty 
+----------------
+ 21 MB
+(1 row)
+```
+
+Получим план запроса с параметрами `analyze` и `buffers`:
+```sql
+EXPLAIN (analyze, buffers, timing off)
+SELECT count(*) FROM flights_copy;
+
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Aggregate  (cost=3968.80..3968.81 rows=1 width=8) (actual rows=1.00 loops=1)
+   Buffers: shared hit=2624 dirtied=1574
+   ->  Seq Scan on flights_copy  (cost=0.00..3699.84 rows=107584 width=0) (actual rows=0.00 loops=1)
+         Buffers: shared hit=2624 dirtied=1574
+ Planning:
+   Buffers: shared hit=6
+ Planning Time: 0.284 ms
+ Execution Time: 25.945 ms
+(8 rows)
+```
+
+Обратим внимание на количество страниц в Buffers и на стоимость.
+
+Очистим таблицу:
+```sql
+VACUUM flights_copy;
+
+VACUUM
+```
+
+Если в конце файла есть страницы только с мертвыми строками, то это место возвращается операционной системе:
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('flights_copy'));
+
+ pg_size_pretty 
+----------------
+ 16 kB
+(1 row)
+```
+
+Мертвые версии строк удалены, размер таблицы уменьшился. Снова получим план запроса:
+```sql
+EXPLAIN (analyze, buffers, timing off)
+SELECT count(*) FROM flights_copy;
+
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
+ Aggregate  (cost=0.00..0.01 rows=1 width=8) (actual rows=1.00 loops=1)
+   ->  Seq Scan on flights_copy  (cost=0.00..0.00 rows=1 width=0) (actual rows=0.00 loops=1)
+ Planning:
+   Buffers: shared hit=2
+ Planning Time: 0.378 ms
+ Execution Time: 0.114 ms
+(6 rows)
+```
+
+Таблица пуста - не прочитано ни одной версии строки, стоимость плана минимальна.
+Время, затраченное на обработку неактуальных версий строк, может быть существенным для таблиц большого размера.
+
+Своевременная очистка таблицы - очень важная операция.
+Если этого не делать, то запросы будут читать лишнюю информацию.
+
+Удалим таблицу:
+```slq
+DROP TABLE flights_copy;
+
+DROP TABLE
+```
