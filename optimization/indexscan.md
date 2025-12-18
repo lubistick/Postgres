@@ -324,6 +324,52 @@ FROM pg_class WHERE relname = 'bookings';
 Вклад индексного доступа остается прежним - `9750`. Добавим `2199` и получим `11949` (полная стоимость узла `Parallel Index Only Scan`).
 
 
+## Многоколоночный индекс
+
+Индекс можно создать по нескольким столбцам.
+В этом случае имеет значение порядок следования столбцов и порядок сортировки.
+Такой индекс ускоряет поиск, если в запросе есть условие на один или несколько первых ключей, поскольку в индексных записях ключи отсортированы сначала по первому столбцу, затем по второму и т.д.
+
+На таблице перелетов создан многоколоночный индекс по столбцам `ticket_no` и `flight_id`.
+Запрос с условием по обоим колонкам использует индекс:
+```sql
+EXPLAIN SELECT * FROM ticket_flights WHERE ticket_no = '0005432000284' AND flight_id  = 187662;
+
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Index Scan using ticket_flights_pkey on ticket_flights  (cost=0.56..8.58 rows=1 width=32)
+   Index Cond: ((ticket_no = '0005432000284'::bpchar) AND (flight_id = 187662))
+(2 rows)
+```
+
+Запрос с условием по номеру билета - тоже:
+```sql
+EXPLAIN SELECT * FROM ticket_flights WHERE ticket_no = '0005432000284';
+
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Index Scan using ticket_flights_pkey on ticket_flights  (cost=0.56..16.58 rows=3 width=32)
+   Index Cond: (ticket_no = '0005432000284'::bpchar)
+(2 rows)
+```
+
+Однако если запрос содержит условие только на второй столбец, индекс оказывается бесполезным:
+```sql
+EXPLAIN SELECT * FROM ticket_flights WHERE flight_id  = 187662;
+
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Gather  (cost=1000.00..114685.10 rows=103 width=32)
+   Workers Planned: 2
+   ->  Parallel Seq Scan on ticket_flights  (cost=0.00..113674.80 rows=43 width=32)
+         Filter: (flight_id = 187662)
+ JIT:
+   Functions: 2
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+(7 rows)
+```
+
+
 ## Include-индексы
 
 Неключевые столбцы include-индекса:
