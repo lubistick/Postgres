@@ -348,7 +348,7 @@ SELECT * FROM airports WHERE city = 'Ульяновск';
 ```
 
 
-## Декартово произведение
+### Декартово произведение
 
 Соединим две таблицы без указания условий соединения, иными словами, выполним декартово произведение таблиц:
 
@@ -369,7 +369,7 @@ EXPLAIN SELECT * FROM airports a1 CROSS JOIN airports a2;
 Узел `Materialize` - "материализация" выборки строк.
 Если выборка не превышает размер, заданный параметром `work_mem`, то она остается в памяти.
 Если превышает - записывается во временный файл.
-В данном случае эта операция выглядит лишней, но в следующем примере она позволяет сканировать во вложенном цикле уже отфильтрованный набор строк из a2, а не всю таблицу:
+В данном случае эта операция выглядит лишней, но в следующем примере она позволяет сканировать во вложенном цикле уже отфильтрованный набор строк из `a2`, а не всю таблицу:
 
 ```sql
 EXPLAIN SELECT * FROM airports a1 CROSS JOIN airports a2 WHERE a2.timezone = 'Europe/Moscow';
@@ -383,3 +383,33 @@ EXPLAIN SELECT * FROM airports a1 CROSS JOIN airports a2 WHERE a2.timezone = 'Eu
                Filter: (timezone = 'Europe/Moscow'::text)
 (5 rows)
 ```
+
+
+### Расстояния между аэропортами
+
+Построим таблицу расстояний между всеми аэропортами так, чтобы каждая пара встречалась только один раз.
+Нам понадобится расширение `earthdistance`:
+
+```sql
+CREATE EXTENSION earthdistance CASCADE;
+
+NOTICE:  installing required extension "cube"
+CREATE EXTENSION
+```
+
+Чтобы отсечь повторяющиеся пары, соединим таблицы по условию `>` (больше):
+
+```sql
+EXPLAIN
+SELECT a1.airport_code "from", a2.airport_code "to", a1.coordinates <@> a2.coordinates "distance, miles"
+FROM airports a1 JOIN airports a2 ON a1.airport_code > a2.airport_code;
+                                             QUERY PLAN
+-----------------------------------------------------------------------------------------------------
+ Nested Loop  (cost=0.14..147.97 rows=3605 width=16)
+   ->  Seq Scan on airports_data ml  (cost=0.00..4.04 rows=104 width=20)
+   ->  Index Scan using airports_data_pkey on airports_data ml_1  (cost=0.14..0.95 rows=35 width=20)
+         Index Cond: (airport_code < ml.airport_code)
+(4 rows)
+```
+
+Вложенный цикл — единственный способ соединения для такого условия.
